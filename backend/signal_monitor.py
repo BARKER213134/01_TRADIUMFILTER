@@ -258,8 +258,18 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
     elif signal.get('signal_type') == 'resistance_breakout':
         signal_type_text = f"\n📈 Пробой сопротивления ({signal.get('level', '')})"
     
-    rsi = market_data.get('rsi', 50)
-    vol = market_data.get('volume_ratio', 1)
+    # Safe number formatting
+    try:
+        rsi = float(market_data.get('rsi', 50))
+        rsi_str = f"{rsi:.0f}"
+    except:
+        rsi_str = str(market_data.get('rsi', 'N/A'))
+    
+    try:
+        vol = float(market_data.get('volume_ratio', 1))
+        vol_str = f"{vol:.1f}x"
+    except:
+        vol_str = str(market_data.get('volume_ratio', 'N/A'))
     
     return f"""{emoji} <b>СИГНАЛ {status}</b>
 
@@ -269,7 +279,7 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
 ├ SL: <code>{signal['stop_loss']}</code>
 └ R:R: <code>{signal['rr_ratio']}</code>
 
-{trend_emoji} Рынок: RSI <code>{rsi:.0f}</code> | Объём <code>{vol:.1f}x</code>
+{trend_emoji} Рынок: RSI <code>{rsi_str}</code> | Объём <code>{vol_str}</code>
 
 🤖 <b>AI ({confidence}%):</b> {reasoning}"""
 
