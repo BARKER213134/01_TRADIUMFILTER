@@ -1,0 +1,131 @@
+{
+  "theme": "LIGHT",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_philosophy": {
+    "emotion": "Objective, rigid, high-precision, authoritative.",
+    "strategy": "MODE B: The 'Control Room' Grid for maximum data density, correlation, and scanability. Focus on functional monochrome with signal colors (Red/Green) indicating actionable trade statuses. Typography heavily relies on variable weights and mono-spaced digits for precision."
+  },
+  "typography": {
+    "primary_font": "Chivo",
+    "primary_font_fallback": "sans-serif",
+    "body_font": "IBM Plex Sans",
+    "body_font_fallback": "sans-serif",
+    "mono_font": "JetBrains Mono",
+    "mono_font_fallback": "monospace",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tighter font-black text-slate-900",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold text-slate-900",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold text-slate-900",
+      "h4": "text-lg sm:text-xl font-medium text-slate-900",
+      "body": "text-base font-normal text-slate-700 leading-relaxed",
+      "small_label": "text-xs tracking-[0.15em] uppercase font-bold text-slate-500",
+      "data_number": "font-mono font-medium tracking-tight"
+    }
+  },
+  "colors": {
+    "background": "#F9FAFB",
+    "surface": "#FFFFFF",
+    "border": "#E5E7EB",
+    "text_primary": "#111827",
+    "text_secondary": "#4B5563",
+    "brand_primary": "#0F172A",
+    "brand_secondary": "#334155",
+    "status": {
+      "success": "#059669",
+      "error": "#DC2626",
+      "warning": "#D97706",
+      "info": "#2563EB"
+    },
+    "chart_palette": ["#0F172A", "#2563EB", "#059669", "#DC2626", "#9CA3AF"]
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-6 md:p-8",
+    "gap": "gap-6",
+    "border_radius": "rounded-sm",
+    "grid_strategy": "Grid Borders ('Technical' Look) using flat surfaces, 1px sharp borders, and zero shadows for default states.",
+    "card_classes": "bg-white border border-gray-200 rounded-sm"
+  },
+  "surfaces_and_micro_themes": {
+    "header": "bg-white/80 backdrop-blur-xl border-b border-gray-200 sticky top-0 z-50",
+    "dashboard_card_default": "bg-white border border-gray-200 rounded-sm overflow-hidden",
+    "dashboard_card_hover": "hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 hover:border-gray-300",
+    "table_container": "border border-gray-200 rounded-sm overflow-hidden"
+  },
+  "components": {
+    "button": {
+      "primary": "bg-slate-900 text-white hover:bg-slate-800 rounded-sm px-6 py-2.5 font-semibold text-sm transition-colors",
+      "secondary": "bg-white border border-gray-300 text-slate-700 hover:bg-gray-50 rounded-sm px-6 py-2.5 font-medium text-sm transition-colors",
+      "danger": "bg-red-600 text-white hover:bg-red-700 rounded-sm px-6 py-2.5 font-semibold text-sm transition-colors"
+    },
+    "badge": {
+      "accepted": "bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase tracking-widest text-[10px] px-2 py-1 rounded-sm font-bold",
+      "rejected": "bg-red-50 text-red-700 border border-red-200 uppercase tracking-widest text-[10px] px-2 py-1 rounded-sm font-bold",
+      "analyzing": "bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-widest text-[10px] px-2 py-1 rounded-sm font-bold",
+      "neutral": "bg-gray-100 text-gray-700 border border-gray-200 uppercase tracking-widest text-[10px] px-2 py-1 rounded-sm font-bold"
+    },
+    "input": "border-gray-300 rounded-sm focus:ring-2 focus:ring-slate-900/20 focus:border-slate-900 text-sm font-mono",
+    "label": "text-xs tracking-widest uppercase text-gray-500 font-bold mb-1.5 block",
+    "chart": "Use Recharts or Shadcn Charts with flat tooltips, monochrome grid lines, and status colors for data points."
+  },
+  "motion_and_interactions": {
+    "hover_states": "All interactive elements must change background or border color on hover. Text colors must remain high-contrast.",
+    "transitions": "Use 'transition-all duration-200 ease-out' for micro-interactions.",
+    "loading": "Use an ASCII-style loader or sharp linear progress bars instead of generic spinning circles."
+  },
+  "icons_and_assets": {
+    "library": "@phosphor-icons/react",
+    "installation_command": "yarn add @phosphor-icons/react",
+    "usage": "Use Phosphor Icons with 'regular' or 'bold' weights for dashboard density."
+  },
+  "media_and_images": {
+    "urls": [
+      {
+        "category": "auth_background",
+        "url": "https://images.unsplash.com/photo-1651227353449-f60d48f6b317?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwYmxhY2slMjBnZW9tZXRyaWMlMjBzaGFwZXxlbnwwfHx8fDE3NzQ1NDQ4OTB8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract black and white geometric pattern for login or settings sidebar background"
+      },
+      {
+        "category": "chart_abstract",
+        "url": "https://images.unsplash.com/photo-1752213355138-7d08b01d2d0e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTN8MHwxfHNlYXJjaHwxfHxzdG9jayUyMG1hcmtldCUyMGNoYXJ0JTIwYWJzdHJhY3QlMjB3aGl0ZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc0NTQ0ODkxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract vertical bars representing market data for empty states or generic banners"
+      }
+    ]
+  },
+  "pages_and_structure": [
+    {
+      "name": "Dashboard / Overview",
+      "layout": "Control Room Grid (grid-cols-4)",
+      "sections": [
+        "Top Nav: Bot Status (Online/Offline Toggle), Connected API indicator.",
+        "KPI Row (col-span-1 each): Total Signals, Accepted (Green), Rejected (Red), Win Rate / Accuracy.",
+        "Main Chart (col-span-3): Signal volume and acceptance rate over time.",
+        "Live Feed (col-span-1 row-span-2): Vertically scrolling list of latest incoming signals with AI reasoning snippet.",
+        "Recent Trades Table (col-span-3): Detailed view of recent analyzed signals with Risk/Reward, Trend, and Action."
+      ]
+    },
+    {
+      "name": "Settings / Configuration",
+      "layout": "Split layout (2 columns on large screens)",
+      "sections": [
+        "AI Filter Rules: Form inputs for Min R/R Ratio, Volume Thresholds, Trend Alignment.",
+        "Telegram Connection: Form inputs for API ID, Hash, and Bot Token. Use password type for secrets.",
+        "Notification Settings: Toggles for alerting."
+      ]
+    }
+  ],
+  "accessibility_and_testing": {
+    "contrast": "Ensure minimum 4.5:1 for normal text.",
+    "testing": "All interactive elements MUST include a data-testid attribute in kebab-case."
+  },
+  "instructions_to_main_agent": [
+    "Load Chivo, IBM Plex Sans, and JetBrains Mono from Google Fonts in index.html.",
+    "Use Phosphor icons for all iconography. Use Phosphor Icons with 'regular' weight.",
+    "Use standard Tailwind classes. For custom spacing use p-6 or p-8 inside cards.",
+    "Use Recharts for the main dashboard chart with the provided chart_palette.",
+    "Do NOT use 'Inter' for headings. Use Chivo font-bold or font-black.",
+    "Implement the 'Control Room' dense bento grid. Make sure grid heights stretch consistently using h-full.",
+    "Apply 'data-testid' to every button, input, and interactive badge.",
+    "Never use rounded-lg or fully rounded buttons. Adhere to rounded-sm for the rigid, technical aesthetic.",
+    "When displaying crypto/fiat numbers, always wrap them in an element using the mono font (JetBrains Mono)."
+  ]
+}
