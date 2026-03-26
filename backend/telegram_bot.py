@@ -48,9 +48,73 @@ binance_client = UMFutures()
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
 def parse_signal(text: str) -> dict | None:
-    """Parse trading signal from various formats"""
+    """Parse trading signal from various formats including cvizor.com breakout signals"""
     text_upper = text.upper()
+    original_text = text
     
+    # === CVIZOR.COM BREAKOUT FORMAT ===
+    # Example: #SKYUSDT.P ПРОБОЙ ПОДДЕРЖКИ 0.0702, Цена 0.07016
+    
+    # Extract symbol from hashtag (e.g., #SKYUSDT.P -> SKYUSDT)
+    symbol_match = re.search(r'#([A-Z0-9]+)(?:\.P)?', text_upper)
+    
+    # Check for breakout signals (ПРОБОЙ)
+    if 'ПРОБОЙ' in text_upper or 'BREAKOUT' in text_upper or 'BREAK' in text_upper:
+        # Determine direction based on support/resistance
+        if 'ПОДДЕРЖК' in text_upper or 'SUPPORT' in text_upper:
+            direction = 'SELL'  # Support breakout = SHORT
+            signal_type = 'support_breakout'
+        elif 'СОПРОТИВЛЕН' in text_upper or 'RESISTANCE' in text_upper:
+            direction = 'BUY'  # Resistance breakout = LONG
+            signal_type = 'resistance_breakout'
+        else:
+            direction = 'BUY'  # Default
+            signal_type = 'breakout'
+        
+        # Find all decimal numbers in the text (format: 0.0702, 0.07016)
+        all_numbers = re.findall(r'(\d+\.\d+)', original_text)
+        all_numbers = [float(n) for n in all_numbers]
+        
+        # Filter to reasonable price values (exclude years, percentages etc)
+        price_numbers = [n for n in all_numbers if 0.0001 < n < 100000]
+        
+        if symbol_match and len(price_numbers) >= 2:
+            symbol = symbol_match.group(1)
+            if symbol.endswith('P'):
+                symbol = symbol[:-1]  # Remove trailing P
+            if not symbol.endswith('USDT'):
+                symbol = symbol + 'USDT'
+            
+            # First number is usually the level, second is current price
+            level = price_numbers[0]
+            price = price_numbers[1] if len(price_numbers) > 1 else level
+            
+            entry = price
+            # Auto-calculate TP/SL based on breakout (2% move)
+            move_pct = 0.02
+            if direction == 'SELL':
+                tp = entry * (1 - move_pct * 2)  # 4% down
+                sl = level * 1.01  # Just above broken level
+            else:
+                tp = entry * (1 + move_pct * 2)  # 4% up
+                sl = level * 0.99  # Just below broken level
+            
+            risk = abs(entry - sl)
+            reward = abs(tp - entry)
+            rr_ratio = reward / risk if risk > 0 else 0
+            
+            return {
+                "symbol": symbol,
+                "direction": direction,
+                "entry_price": round(entry, 6),
+                "take_profit": round(tp, 6),
+                "stop_loss": round(sl, 6),
+                "rr_ratio": round(rr_ratio, 2),
+                "signal_type": signal_type,
+                "level": round(level, 6)
+            }
+    
+    # === STANDARD FORMATS ===
     patterns = [
         # Format: BUY BTCUSDT @ 95000, TP: 96000, SL: 94500
         r'(BUY|SELL|LONG|SHORT)\s+([A-Z0-9]+)\s*@?\s*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
@@ -226,12 +290,23 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
         status = "ПРОПУЩЕН"
     
     trend_emoji = "📈" if market_data.get('trend') == 'BULLISH' else "📉"
-    direction_emoji = "🟢" if signal['direction'] == 'BUY' else "🔴"
+    direction_emoji = "🟢 LONG" if signal['direction'] == 'BUY' else "🔴 SHORT"
+    
+    # Check for breakout signal type
+    signal_type_text = ""
+    if signal.get('signal_type'):
+        if signal['signal_type'] == 'support_breakout':
+            signal_type_text = "📉 Пробой поддержки"
+        elif signal['signal_type'] == 'resistance_breakout':
+            signal_type_text = "📈 Пробой сопротивления"
+        if signal.get('level'):
+            signal_type_text += f" ({signal['level']})"
     
     msg = f"""
 {emoji} <b>СИГНАЛ {status}</b>
 
-{direction_emoji} <b>{signal['direction']} {signal['symbol']}</b>
+{direction_emoji} <b>{signal['symbol']}</b>
+{signal_type_text}
 ├ Вход: <code>{signal['entry_price']}</code>
 ├ TP: <code>{signal['take_profit']}</code>
 ├ SL: <code>{signal['stop_loss']}</code>
