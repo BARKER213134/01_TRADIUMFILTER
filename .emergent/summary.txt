@@ -1,0 +1,150 @@
+<analysis>**original_problem_statement:** у меня есть бот который присылает мне сигналы, в телеграм, но мне не хватает условий для входа в сделку, мне надо сделать нового бота в телеграм который будет отбирать сделки и анализировать их с помощью ai. The source bot is . The AI should filter based on technical analysis, Risk/Reward, and volume.
+
+**User's preferred language:** Russian (INSTRUCT next agent to respond in the user's preferred language only)
+
+**what currently exists?** 
+A multi-component Telegram-based trading system. 
+1. : A Telethon user-client that automatically reads signals from the private .
+2. : The user-facing bot () that receives parsed signals, analyzes them using GPT-5.2 (acting as a pro trader looking at technicals, news, and R:R), and allows manual signal forwarding.
+3. : A background loop that monitors accepted signals and alerts the user when the entry price is hit.
+4. : Advanced AI analysis module using Kraken and CoinGecko APIs for market data.
+There is a React frontend initialized, but the core UX has shifted entirely to the Telegram bot interface.
+
+**Last working item:**
+- Last item agent was working: Investigating why automated signals stopped arriving after the app was deployed/restarted. The agent executed a bash command to check processes which returned an error.
+- Status: IN PROGRESS
+- Agent Testing Done: N
+- Which testing method agent to use? manual testing by checking supervisor/process logs and sending test messages in Telegram.
+- User Testing Done: N
+
+**All Pending/In progress Issue list:** 
+Issue 1: Signals stopped arriving after deployment (P0)
+Issue 2: Python scripts are not managed by Supervisor (P0)
+
+Issues Detail:
+- Issue 1: 
+   - Attempted fixes: The agent tried to list running processes but failed before the session ended.
+   - Next debug checklist: Check if , , and  are actually running. Verify if the Telethon session file () survived the deployment or if the user needs to re-authenticate.
+   - Why fix this issue and what will be achieved with the fix? This is the core functionality; without it, the bot is completely offline.
+   - Status: IN PROGRESS
+   - Is recurring issue? N
+   - Should Test frontend/backend/both after fix? backend (Telegram flow)
+   - Blocked on other issue: Issue 2
+
+- Issue 2: 
+   - Attempted fixes: Agent was manually running scripts via bash (). This is highly volatile.
+   - Next debug checklist: Create  files in  for , , and  so they are automatically managed, restarted on failure, and survive deployments. Alternatively, integrate them into the  FastAPI lifecycle.
+   - Why fix this issue and what will be achieved with the fix? Prevents the bot from dying every time the environment restarts or memory limits are hit.
+   - Status: NOT STARTED
+   - Is recurring issue? Y (Caused the current outage)
+   - Should Test frontend/backend/both after fix? backend
+   - Blocked on other issue: None
+
+**In progress Task List:**
+None. The agent had just finished implementing new signal parsing formats before the outage was reported.
+
+**Upcoming and Future Tasks**
+Upcoming Tasks:
+- Implement Webhook functionality for automated trading (P1). User mentioned: потом будем делать под вебхук (later we will do it for webhooks).
+
+**Completed work in this session**
+- Initialized FastAPI + React + MongoDB architecture (DONE)
+- Configured Telethon with 2FA to read signals directly from  (DONE)
+- Advanced regex parsing for 5+ different signal formats containing emojis (DONE)
+- Implemented  for deep AI analysis (technicals, R:R, news) in Russian (DONE)
+- Created  to track prices and send Entry Hit alerts with TP/SL (DONE)
+- Migrated market data sources from Binance Futures (geo-blocked) to Kraken and CoinGecko (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+- Issue 1: Binance API Geo-blocking (Error 451)
+   - Debug checklist: Agent switched to Kraken and CoinGecko. However, Kraken lacks data for many obscure altcoins.
+   - Why to solve this issue and what will be achieved with this? If the user trades rare altcoins, the AI will reject signals due to missing market data.
+   - Should Test frontend/backend/both after fix: backend
+   - Is recurring issue? Y
+
+**Known issue recurrence from previous fork**
+- Issue recurrence in previous fork: N/A (First fork)
+
+**Code Architecture**
+/app/
+├── backend/
+│   ├── server.py (FastAPI application)
+│   ├── telegram_bot.py (Main bot handler and UI)
+│   ├── signal_monitor.py (Telethon client reading source bot)
+│   ├── entry_monitor.py (Price checking loop for entry alerts)
+│   ├── pro_analyzer.py (GPT-5.2 + Market Data logic)
+│   ├── telethon_auth.py / tg_step*.py (Auth helper scripts)
+│   ├── .env
+│   └── requirements.txt
+├── frontend/
+│   ├── src/ (React app, shadcn UI components)
+│   └── package.json
+└── memory/
+    └── PRD.md
+
+**Key Technical Concepts**
+Python (FastAPI, AsyncIO), Telethon (Telegram User API for scraping), python-telegram-bot (for user interaction), MongoDB (data persistence), Emergent Integrations (GPT-5.2 for NLP analysis).
+
+**key DB schema**
+- : {symbol, direction, entry_price, take_profit, stop_loss, rr_ratio, status, ai_reasoning, raw_text, created_at, entry_hit}
+
+**changes in tech stack**
+- Abandoned  due to strict geo-blocking (Error 451). Now heavily relying on Kraken API and CoinGecko API for market data.
+
+**All files of reference**
+- : Core user-facing bot logic.
+- : Core script scraping .
+- : Core script checking prices.
+- : Advanced AI logic.
+
+**Areas that need refactoring**
+-  and various  files were created during a struggle to bypass Telegram's 2FA and OTP process. They can be cleaned up or consolidated.
+- Background process management MUST be moved to Supervisor.
+
+**key api endpoints**
+Frontend API endpoints exist in , but the primary endpoints for this app are now Telegram commands (, , , ) handled in .
+
+**Critical Info for New Agent**
+- **SUPERVISOR IS MANDATORY:** Do not run long-running python scripts using . They will be killed by the system. You must create supervisor configurations for , , and .
+- **Binance is Blocked:** Do not attempt to use Binance API. It returns a 451 Restricted Location error in this environment. Keep using Kraken/CoinGecko or add MEXC/KuCoin if more altcoins are needed.
+- **Telegram Auth:** The user's Telegram has 2FA enabled. The password is . If the  file was lost during deployment, you will need to trigger the Telethon auth flow again and ask the user for a new OTP code.
+
+**documents and test reports created in this job**
+- /app/memory/PRD.md
+- /app/test_reports/iteration_1.json
+
+**Last 10 User Messages and any pending HUMAN messages**
+1. (Pending) после деплоя не приходят сигналы (after deployment signals are not arriving) - Agent needs to fix process management/session persistence.
+2. User provided multiple new signal formats to parse (DEXEUSDT, ACXUSDT, etc.) -> DONE.
+3. сделай в боте кнопки сигнал вход статистика -> DONE.
+4. Requested an entry monitor that alerts when entry price is reached -> DONE.
+5. в 22:16 прешел сигнал его нет в боте -> Fixed HTML formatting issue.
+6. ты очень долго работаешь чего так? -> Agent explained API blocks.
+7. Noted missing data for RSI/MACD/EMA/volumes. -> Added Kraken/CoinGecko.
+8. что мне надо, эай должен проанализировать все новости... -> Created pro_analyzer.py.
+9. по русски пиши описания от ai -> Updated GPT prompts to Russian.
+10. Shared a rejected signal to debug -> Agent adjusted AI constraints.
+
+**Project Health Check:**
+Broken (Background scripts died upon deployment/restart).
+
+**3rd Party Integrations**
+- OpenAI GPT-5.2 — uses Emergent LLM Key
+- Telegram Bot API — requires User API Key (Bot token in .env)
+- Telethon (Telegram User API) — requires User API Key (API ID/Hash provided by user)
+- Kraken API — Public (No key)
+- CoinGecko API — Public (No key)
+
+**Testing status**
+- Testing agent used after significant changes: YES
+- Troubleshoot agent used after agent stuck in loop: NO
+- Test files created: None
+- Known regressions: Background scripts do not survive environment restarts.
+
+**Credentials to test flow:**
+- User Telegram Phone: 
+- User Telegram 2FA Password: 
+- Target Source Bot: 
+
+**What agent forgot to execute**
+The agent completely forgot to configure  for the three distinct Python worker scripts they created (, , ), choosing instead to run them via unstable detached bash commands. This is the direct cause of the current user complaint.</analysis>
