@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from binance.um_futures import UMFutures
 import pandas as pd
 import ta
 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -24,8 +23,11 @@ load_dotenv(ROOT_DIR / '.env')
 
 logger = logging.getLogger(__name__)
 
-# Binance client
-binance_client = UMFutures()
+# Use CCXT for exchange data (Kraken works globally)
+import ccxt
+
+# Initialize exchange (Kraken works globally without restrictions)
+exchange = ccxt.kraken({'enableRateLimit': True})
 
 
 async def search_web(query: str) -> str:
@@ -141,13 +143,17 @@ async def get_social_sentiment(symbol: str) -> str:
 
 
 def get_advanced_technicals(symbol: str) -> dict:
-    """Get comprehensive technical analysis from multiple sources"""
+    """Get comprehensive technical analysis using CCXT (Kraken)"""
     try:
-        # Try different symbol formats
+        # Normalize symbol for CCXT
+        base = symbol.replace("USDT", "").replace("PERP", "").upper()
+        
+        # Kraken uses different symbol format
+        # Try multiple formats
         symbols_to_try = [
-            symbol,
-            symbol.replace("USDT", "") + "USDT",
-            symbol.upper()
+            f"{base}/USDT",
+            f"{base}/USD",
+            f"X{base}/ZUSD" if base in ['BTC', 'ETH', 'XRP', 'LTC'] else f"{base}/USD"
         ]
         
         klines_1h = None
@@ -157,47 +163,40 @@ def get_advanced_technicals(symbol: str) -> dict:
         
         for sym in symbols_to_try:
             try:
-                klines_1h = binance_client.klines(symbol=sym, interval='1h', limit=100)
-                if klines_1h:
+                klines_1h = exchange.fetch_ohlcv(sym, '1h', limit=100)
+                if klines_1h and len(klines_1h) > 20:
                     working_symbol = sym
-                    klines_4h = binance_client.klines(symbol=sym, interval='4h', limit=100)
-                    klines_1d = binance_client.klines(symbol=sym, interval='1d', limit=50)
+                    klines_4h = exchange.fetch_ohlcv(sym, '4h', limit=100)
+                    klines_1d = exchange.fetch_ohlcv(sym, '1d', limit=50)
+                    logger.info(f"Found data for {sym}")
                     break
             except Exception as e:
                 continue
         
         if not klines_1h:
-            # Try spot market if futures not available
+            # Try OKX as backup
             try:
-                from binance.spot import Spot
-                spot_client = Spot()
-                for sym in symbols_to_try:
-                    try:
-                        klines_1h = spot_client.klines(sym, '1h', limit=100)
-                        if klines_1h:
-                            working_symbol = sym
-                            klines_4h = spot_client.klines(sym, '4h', limit=100)
-                            klines_1d = spot_client.klines(sym, '1d', limit=50)
-                            logger.info(f"Using SPOT data for {sym}")
-                            break
-                    except:
-                        continue
-            except Exception as e:
-                logger.error(f"Spot fallback failed: {e}")
+                okx = ccxt.okx({'enableRateLimit': True})
+                sym = f"{base}/USDT"
+                klines_1h = okx.fetch_ohlcv(sym, '1h', limit=100)
+                if klines_1h:
+                    working_symbol = sym
+                    klines_4h = okx.fetch_ohlcv(sym, '4h', limit=100)
+                    klines_1d = okx.fetch_ohlcv(sym, '1d', limit=50)
+                    logger.info(f"Using OKX for {sym}")
+            except Exception as e2:
+                logger.error(f"OKX fallback failed: {e2}")
         
-        if not klines_1h:
+        if not klines_1h or len(klines_1h) < 20:
             logger.warning(f"No data found for {symbol}")
             return {}
         
         def analyze_tf(klines, tf_name):
-            if not klines:
+            if not klines or len(klines) < 20:
                 return {}
             
-            df = pd.DataFrame(klines, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-                'taker_buy_quote', 'ignore'
-            ])
+            # CCXT returns [timestamp, open, high, low, close, volume]
+            df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = pd.to_numeric(df[col])
@@ -215,12 +214,11 @@ def get_advanced_technicals(symbol: str) -> dict:
             bb = ta.volatility.BollingerBands(df['close'], window=20)
             bb_upper = bb.bollinger_hband().iloc[-1]
             bb_lower = bb.bollinger_lband().iloc[-1]
-            bb_mid = bb.bollinger_mavg().iloc[-1]
             
             # EMAs
             ema9 = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator().iloc[-1]
             ema21 = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator().iloc[-1]
-            ema50 = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator().iloc[-1]
+            ema50 = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator().iloc[-1] if len(df) >= 50 else None
             ema200 = ta.trend.EMAIndicator(df['close'], window=200).ema_indicator().iloc[-1] if len(df) >= 200 else None
             
             # ATR (volatility)
@@ -244,16 +242,19 @@ def get_advanced_technicals(symbol: str) -> dict:
             price_change_24h = ((current_price - df['close'].iloc[-24]) / df['close'].iloc[-24] * 100) if len(df) >= 24 else 0
             
             # Trend determination
-            if ema9 > ema21 > ema50:
-                trend = "STRONG_BULLISH"
-            elif ema9 > ema21:
-                trend = "BULLISH"
-            elif ema9 < ema21 < ema50:
-                trend = "STRONG_BEARISH"
-            elif ema9 < ema21:
-                trend = "BEARISH"
+            if ema50:
+                if ema9 > ema21 > ema50:
+                    trend = "STRONG_BULLISH"
+                elif ema9 > ema21:
+                    trend = "BULLISH"
+                elif ema9 < ema21 < ema50:
+                    trend = "STRONG_BEARISH"
+                elif ema9 < ema21:
+                    trend = "BEARISH"
+                else:
+                    trend = "NEUTRAL"
             else:
-                trend = "NEUTRAL"
+                trend = "BULLISH" if ema9 > ema21 else "BEARISH"
             
             return {
                 "timeframe": tf_name,
@@ -269,7 +270,7 @@ def get_advanced_technicals(symbol: str) -> dict:
                 "bb_position": "ABOVE" if current_price > bb_upper else ("BELOW" if current_price < bb_lower else "INSIDE"),
                 "ema9": round(ema9, 6) if pd.notna(ema9) else 0,
                 "ema21": round(ema21, 6) if pd.notna(ema21) else 0,
-                "ema50": round(ema50, 6) if pd.notna(ema50) else 0,
+                "ema50": round(ema50, 6) if ema50 and pd.notna(ema50) else None,
                 "ema200": round(ema200, 6) if ema200 and pd.notna(ema200) else None,
                 "atr": round(atr, 6) if pd.notna(atr) else 0,
                 "volume_ratio": round(vol_ratio, 2),
@@ -283,7 +284,7 @@ def get_advanced_technicals(symbol: str) -> dict:
             "1h": analyze_tf(klines_1h, "1H"),
             "4h": analyze_tf(klines_4h, "4H"),
             "1d": analyze_tf(klines_1d, "1D"),
-            "source": "futures" if "futures" in str(type(binance_client)).lower() else "spot"
+            "source": "kraken" if "kraken" in str(working_symbol).lower() or working_symbol else "okx"
         }
         
     except Exception as e:
@@ -349,18 +350,26 @@ async def deep_analyze_signal(signal: dict) -> dict:
     # Format CoinGecko data
     cg_info = ""
     if coingecko:
+        price_change_24h = coingecko.get('price_change_24h', 0) or 0
+        price_change_7d = coingecko.get('price_change_7d', 0) or 0
+        ath_change = coingecko.get('ath_change', 0) or 0
+        sentiment_up = coingecko.get('sentiment_up', 0) or 0
+        sentiment_down = coingecko.get('sentiment_down', 0) or 0
+        volume_24h = coingecko.get('volume_24h', 0) or 0
+        twitter = coingecko.get('twitter_followers', 0) or 0
+        
         cg_info = f"""
 === COINGECKO DATA ===
 • Название: {coingecko.get('name', 'N/A')}
 • Цена USD: ${coingecko.get('price_usd', 'N/A')}
-• Изменение 24ч: {coingecko.get('price_change_24h', 'N/A'):.2f}%
-• Изменение 7д: {coingecko.get('price_change_7d', 'N/A'):.2f}%
+• Изменение 24ч: {price_change_24h:.2f}%
+• Изменение 7д: {price_change_7d:.2f}%
 • Market Cap Rank: #{coingecko.get('market_cap_rank', 'N/A')}
-• Объём 24ч: ${coingecko.get('volume_24h', 0):,.0f}
-• ATH: ${coingecko.get('ath', 'N/A')} ({coingecko.get('ath_change', 'N/A'):.1f}% от ATH)
+• Объём 24ч: ${volume_24h:,.0f}
+• ATH: ${coingecko.get('ath', 'N/A')} ({ath_change:.1f}% от ATH)
 • High/Low 24ч: ${coingecko.get('high_24h', 'N/A')} / ${coingecko.get('low_24h', 'N/A')}
-• Twitter подписчики: {coingecko.get('twitter_followers', 0):,}
-• Настроения: {coingecko.get('sentiment_up', 0):.0f}% позитивные / {coingecko.get('sentiment_down', 0):.0f}% негативные
+• Twitter подписчики: {twitter:,}
+• Настроения: {sentiment_up:.0f}% позитивные / {sentiment_down:.0f}% негативные
 """
     
     prompt = f"""
