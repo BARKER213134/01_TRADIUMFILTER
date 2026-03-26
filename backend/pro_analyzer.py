@@ -440,6 +440,8 @@ R:R Ratio: {signal['rr_ratio']}
 
 def format_deep_analysis(signal: dict, analysis: dict) -> str:
     """Format deep analysis for Telegram"""
+    import html
+    
     decision = analysis.get('decision', 'SKIP')
     confidence = analysis.get('confidence', 0)
     
@@ -461,6 +463,14 @@ def format_deep_analysis(signal: dict, analysis: dict) -> str:
     elif signal.get('signal_type') == 'resistance_breakout':
         signal_type_text = f"📈 Пробой сопротивления ({signal.get('level', '')})"
     
+    # Escape HTML in AI responses
+    summary = html.escape(str(analysis.get('summary', 'N/A')))
+    tech_analysis = html.escape(str(analysis.get('technical_analysis', 'N/A')))
+    news_impact = html.escape(str(analysis.get('news_impact', 'Нет данных')))
+    sentiment = html.escape(str(analysis.get('sentiment', 'Нет данных')))
+    risk_assessment = html.escape(str(analysis.get('risk_assessment', 'N/A')))
+    recommendation = html.escape(str(analysis.get('recommendation', 'N/A')))
+    
     return f"""{emoji} <b>{status} | {confidence}% уверенность</b>
 
 {dir_emoji} <b>{signal['symbol']}</b>
@@ -478,23 +488,20 @@ def format_deep_analysis(signal: dict, analysis: dict) -> str:
 ├ MACD: <code>{tech.get('macd_histogram', 'N/A')}</code>
 └ Объём: <code>{tech.get('volume_ratio', 'N/A')}x</code>
 
-📝 <b>Краткий вердикт:</b>
-{analysis.get('summary', 'N/A')}
+📝 <b>Вердикт:</b>
+{summary}
 
-📈 <b>Анализ графика:</b>
-{analysis.get('technical_analysis', 'N/A')}
+📈 <b>Анализ:</b>
+{tech_analysis}
 
 📰 <b>Новости:</b>
-{analysis.get('news_impact', 'Нет данных')}
-
-🐦 <b>Настроения:</b>
-{analysis.get('sentiment', 'Нет данных')}
+{news_impact}
 
 ⚠️ <b>Риски:</b>
-{analysis.get('risk_assessment', 'N/A')}
+{risk_assessment}
 
 🎯 <b>Рекомендация:</b>
-{analysis.get('recommendation', 'N/A')}"""
+{recommendation}"""
 
 
 # Export for use in other modules
