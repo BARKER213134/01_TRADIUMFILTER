@@ -223,15 +223,9 @@ async def analyze_with_ai(signal: dict, market_data: dict) -> dict:
         chat = LlmChat(
             api_key=api_key,
             session_id=f"tg-signal-{signal.get('symbol', 'unknown')}-{datetime.now().timestamp()}",
-            system_message="""You are an expert crypto trading analyst. Analyze trading signals and provide recommendations.
+            system_message="""Ты эксперт по криптотрейдингу. Анализируй сигналы кратко.
             
-You must respond ONLY with valid JSON in this exact format:
-{
-    "decision": "ACCEPT" or "REJECT",
-    "confidence": 0-100,
-    "reasoning": "Brief explanation in 1-2 sentences",
-    "key_factors": ["factor1", "factor2"]
-}"""
+Отвечай ТОЛЬКО JSON: {"decision": "ACCEPT" или "REJECT", "confidence": 0-100, "reasoning": "1-2 предложения на русском"}"""
         ).with_model("openai", "gpt-5.2")
         
         prompt = f"""Analyze this trading signal:
