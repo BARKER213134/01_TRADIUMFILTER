@@ -51,126 +51,152 @@ binance_client = UMFutures()
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
 def parse_signal(text: str) -> dict | None:
-    """Parse trading signal from various formats including cvizor.com breakout signals"""
+    """Parse trading signal from various cvizor.com formats"""
     text_upper = text.upper()
     original_text = text
     
-    # === CVIZOR.COM BREAKOUT FORMAT ===
-    # Example: #SKYUSDT.P ПРОБОЙ ПОДДЕРЖКИ 0.0702, Цена 0.07016
+    # === EXTRACT SYMBOL ===
+    # Format: BINANCE:DEXEUSDT.P or #DEXEUSDT.P
+    symbol_match = re.search(r'(?:BINANCE:|#)([A-Z0-9]+)(?:\.P)?', text_upper)
+    if not symbol_match:
+        symbol_match = re.search(r'#([A-Z0-9]+)', text_upper)
     
-    # Extract symbol from hashtag (e.g., #SKYUSDT.P -> SKYUSDT)
-    symbol_match = re.search(r'#([A-Z0-9]+)(?:\.P)?', text_upper)
+    if not symbol_match:
+        return None
     
-    # Check for breakout signals (ПРОБОЙ)
-    if 'ПРОБОЙ' in text_upper or 'BREAKOUT' in text_upper or 'BREAK' in text_upper:
-        # Determine direction based on support/resistance
-        if 'ПОДДЕРЖК' in text_upper or 'SUPPORT' in text_upper:
-            direction = 'SELL'  # Support breakout = SHORT
-            signal_type = 'support_breakout'
-        elif 'СОПРОТИВЛЕН' in text_upper or 'RESISTANCE' in text_upper:
-            direction = 'BUY'  # Resistance breakout = LONG
-            signal_type = 'resistance_breakout'
+    symbol = symbol_match.group(1)
+    if symbol.endswith('P'):
+        symbol = symbol[:-1]
+    if not symbol.endswith('USDT'):
+        symbol = symbol + 'USDT'
+    
+    # === EXTRACT PRICE ===
+    price_match = re.search(r'(?:ЦЕНА|PRICE)[:\s]*([\d.]+)', text_upper)
+    if not price_match:
+        # Try to find price at end
+        all_nums = re.findall(r'(\d+\.?\d*)', original_text)
+        price_candidates = [float(n) for n in all_nums if 0.0001 < float(n) < 100000]
+        if price_candidates:
+            price_match_val = price_candidates[-1]  # Last number is usually price
         else:
-            direction = 'BUY'  # Default
+            return None
+    else:
+        price_match_val = float(price_match.group(1))
+    
+    price = price_match_val
+    if price <= 0:
+        return None
+    
+    # === DETERMINE DIRECTION ===
+    direction = None
+    signal_type = "unknown"
+    
+    # Check emojis and keywords
+    if '🔻' in text or 'SHORT' in text_upper or 'ШОРТ' in text_upper:
+        direction = 'SELL'
+        signal_type = 'short_signal'
+    elif '🟢' in text or '✅' in text or 'LONG' in text_upper or 'ЛОНГ' in text_upper or 'RAKETA' in text_upper:
+        direction = 'BUY'
+        signal_type = 'long_signal'
+    elif '🟡' in text:
+        # Yellow = breakout, determine by context
+        if 'ПРОБОЙ СОПРОТИВЛЕН' in text_upper or 'RESISTANCE' in text_upper:
+            direction = 'BUY'
+            signal_type = 'resistance_breakout'
+        elif 'ПРОБОЙ ПОДДЕРЖК' in text_upper or 'SUPPORT' in text_upper:
+            direction = 'SELL'
+            signal_type = 'support_breakout'
+        else:
+            direction = 'BUY'
             signal_type = 'breakout'
-        
-        # Find all decimal numbers in the text (format: 0.0702, 0.07016)
-        all_numbers = re.findall(r'(\d+\.\d+)', original_text)
-        all_numbers = [float(n) for n in all_numbers]
-        
-        # Filter to reasonable price values (exclude years, percentages etc)
-        price_numbers = [n for n in all_numbers if 0.0001 < n < 100000]
-        
-        if symbol_match and len(price_numbers) >= 2:
-            symbol = symbol_match.group(1)
-            if symbol.endswith('P'):
-                symbol = symbol[:-1]  # Remove trailing P
-            if not symbol.endswith('USDT'):
-                symbol = symbol + 'USDT'
-            
-            # First number is usually the level, second is current price
-            level = price_numbers[0]
-            price = price_numbers[1] if len(price_numbers) > 1 else level
-            
-            entry = price
-            # Auto-calculate TP/SL based on breakout (2% move)
-            move_pct = 0.02
-            if direction == 'SELL':
-                tp = entry * (1 - move_pct * 2)  # 4% down
-                sl = level * 1.01  # Just above broken level
-            else:
-                tp = entry * (1 + move_pct * 2)  # 4% up
-                sl = level * 0.99  # Just below broken level
-            
-            risk = abs(entry - sl)
-            reward = abs(tp - entry)
-            rr_ratio = reward / risk if risk > 0 else 0
-            
-            return {
-                "symbol": symbol,
-                "direction": direction,
-                "entry_price": round(entry, 6),
-                "take_profit": round(tp, 6),
-                "stop_loss": round(sl, 6),
-                "rr_ratio": round(rr_ratio, 2),
-                "signal_type": signal_type,
-                "level": round(level, 6)
-            }
+    elif 'ПРОБОЙ ПОДДЕРЖК' in text_upper:
+        direction = 'SELL'
+        signal_type = 'support_breakout'
+    elif 'ПРОБОЙ СОПРОТИВЛЕН' in text_upper or 'ПРОБОЙ УРОВНЯ' in text_upper:
+        direction = 'BUY'
+        signal_type = 'resistance_breakout'
+    elif '🟤' in text:
+        # Brown = support breakout
+        direction = 'SELL'
+        signal_type = 'support_breakout'
     
-    # === STANDARD FORMATS ===
-    patterns = [
-        # Format: BUY BTCUSDT @ 95000, TP: 96000, SL: 94500
-        r'(BUY|SELL|LONG|SHORT)\s+([A-Z0-9]+)\s*@?\s*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
-        # Format: BTCUSDT BUY Entry: 95000 TP: 96000 SL: 94500
-        r'([A-Z0-9]+)\s+(BUY|SELL|LONG|SHORT).*?ENTRY[:\s]*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
-        # Format: LONG ADAUSDT Entry: 0.45 TP: 0.48 SL: 0.42
-        r'(LONG|SHORT|BUY|SELL)\s+([A-Z0-9]+).*?ENTRY[:\s]*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
-        # Format: Signal: LONG BTCUSDT 95000-96000-94500
-        r'(LONG|SHORT|BUY|SELL)\s+([A-Z0-9]+)\s+([\d.]+)[\s\-]+([\d.]+)[\s\-]+([\d.]+)',
-        # Simpler format: BTCUSDT LONG 95000 TP 96000 SL 94500
-        r'([A-Z0-9]+)\s+(LONG|SHORT|BUY|SELL)\s+([\d.]+).*?TP\s*([\d.]+).*?SL\s*([\d.]+)',
-    ]
+    if not direction:
+        # Try RSI context
+        rsi_high = re.search(r'RSI\d*\s*(?:БОЛЬШЕ|>)\s*(?:ЧЕМ)?\s*(\d+)', text_upper)
+        rsi_low = re.search(r'RSI\d*\s*(?:МЕНЬШЕ|<)\s*(?:ЧЕМ)?\s*(\d+)', text_upper)
+        
+        if rsi_high:
+            rsi_val = int(rsi_high.group(1))
+            if rsi_val >= 60:
+                direction = 'SELL'
+        elif rsi_low:
+            rsi_val = int(rsi_low.group(1))
+            if rsi_val <= 40:
+                direction = 'BUY'
+        
+        if not direction:
+            direction = 'BUY'
+            signal_type = 'general'
     
-    for pattern in patterns:
-        match = re.search(pattern, text_upper, re.IGNORECASE | re.DOTALL)
-        if match:
-            groups = match.groups()
-            
-            if groups[0] in ['BUY', 'SELL', 'LONG', 'SHORT']:
-                direction = 'BUY' if groups[0] in ['BUY', 'LONG'] else 'SELL'
-                symbol = groups[1]
-                entry = float(groups[2])
-                tp = float(groups[3])
-                sl = float(groups[4])
-            else:
-                symbol = groups[0]
-                direction = 'BUY' if groups[1] in ['BUY', 'LONG'] else 'SELL'
-                entry = float(groups[2])
-                tp = float(groups[3])
-                sl = float(groups[4])
-            
-            if not symbol.endswith('USDT'):
-                symbol = symbol + 'USDT'
-            
+    # === EXTRACT LEVELS FOR TP/SL ===
+    support_match = re.search(r'(?:ПОДДЕРЖК|SUPPORT)[^\d]*(-?[\d.]+)%', text_upper)
+    resistance_match = re.search(r'(?:СОПРОТИВЛЕН|RESISTANCE)[^\d]*(-?[\d.]+)%', text_upper)
+    level_match = re.search(r'(?:ПРОБОЙ\s+(?:ПОДДЕРЖК|СОПРОТИВЛЕН|УРОВНЯ)\w*)\s*([\d.]+)', text_upper)
+    
+    # Calculate TP and SL
+    if direction == 'BUY':
+        if support_match:
+            support_dist = abs(float(support_match.group(1)))
+            sl = price * (1 - support_dist / 100 - 0.01)
+        else:
+            sl = price * 0.97
+        
+        if resistance_match:
+            resist_dist = abs(float(resistance_match.group(1)))
+            tp = price * (1 + resist_dist / 100 + 0.02)
+        else:
+            tp = price * 1.04
+    else:
+        if resistance_match:
+            resist_dist = abs(float(resistance_match.group(1)))
+            sl = price * (1 + resist_dist / 100 + 0.01)
+        else:
+            sl = price * 1.03
+        
+        if support_match:
+            support_dist = abs(float(support_match.group(1)))
+            tp = price * (1 - support_dist / 100 - 0.02)
+        else:
+            tp = price * 0.96
+    
+    # Use breakout level
+    if level_match:
+        level = float(level_match.group(1))
+        if level > 0:
             if direction == 'BUY':
-                risk = entry - sl
-                reward = tp - entry
+                sl = min(sl, level * 0.99)
             else:
-                risk = sl - entry
-                reward = entry - tp
-            
-            rr_ratio = reward / risk if risk > 0 else 0
-            
-            return {
-                "symbol": symbol,
-                "direction": direction,
-                "entry_price": entry,
-                "take_profit": tp,
-                "stop_loss": sl,
-                "rr_ratio": round(rr_ratio, 2)
-            }
+                sl = max(sl, level * 1.01)
     
-    return None
+    # R:R
+    if direction == 'BUY':
+        risk = price - sl
+        reward = tp - price
+    else:
+        risk = sl - price
+        reward = price - tp
+    
+    rr_ratio = reward / risk if risk > 0 else 0
+    
+    return {
+        "symbol": symbol,
+        "direction": direction,
+        "entry_price": round(price, 6),
+        "take_profit": round(tp, 6),
+        "stop_loss": round(sl, 6),
+        "rr_ratio": round(rr_ratio, 2),
+        "signal_type": signal_type
+    }
 
 async def get_market_data(symbol: str) -> dict:
     """Fetch market data from Binance Futures"""
