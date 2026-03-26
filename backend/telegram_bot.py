@@ -296,31 +296,45 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
     signal_type_text = ""
     if signal.get('signal_type'):
         if signal['signal_type'] == 'support_breakout':
-            signal_type_text = "📉 Пробой поддержки"
+            signal_type_text = "\n📉 Пробой поддержки"
         elif signal['signal_type'] == 'resistance_breakout':
-            signal_type_text = "📈 Пробой сопротивления"
+            signal_type_text = "\n📈 Пробой сопротивления"
         if signal.get('level'):
             signal_type_text += f" ({signal['level']})"
     
-    msg = f"""
-{emoji} <b>СИГНАЛ {status}</b>
+    # Safe formatting for market data
+    current_price = market_data.get('current_price', 'N/A')
+    rsi = market_data.get('rsi', 50)
+    trend = market_data.get('trend', 'N/A')
+    volume_ratio = market_data.get('volume_ratio', 1)
+    
+    # Convert to float if needed
+    try:
+        rsi_str = f"{float(rsi):.1f}"
+    except:
+        rsi_str = str(rsi)
+    
+    try:
+        vol_str = f"{float(volume_ratio):.1f}x"
+    except:
+        vol_str = str(volume_ratio)
+    
+    msg = f"""{emoji} <b>СИГНАЛ {status}</b>
 
-{direction_emoji} <b>{signal['symbol']}</b>
-{signal_type_text}
+{direction_emoji} <b>{signal['symbol']}</b>{signal_type_text}
 ├ Вход: <code>{signal['entry_price']}</code>
 ├ TP: <code>{signal['take_profit']}</code>
 ├ SL: <code>{signal['stop_loss']}</code>
 └ R:R: <code>{signal['rr_ratio']}</code>
 
 {trend_emoji} <b>Рынок:</b>
-├ Цена: <code>{market_data.get('current_price', 'N/A')}</code>
-├ RSI: <code>{market_data.get('rsi', 0):.1f}</code>
-├ Тренд: {market_data.get('trend', 'N/A')}
-└ Объём: <code>{market_data.get('volume_ratio', 1):.1f}x</code>
+├ Цена: <code>{current_price}</code>
+├ RSI: <code>{rsi_str}</code>
+├ Тренд: {trend}
+└ Объём: <code>{vol_str}</code>
 
 🤖 <b>AI ({confidence}%):</b>
-{reasoning}
-"""
+{reasoning}"""
     return msg.strip()
 
 # Bot handlers
