@@ -22,6 +22,9 @@ import pandas as pd
 import ta
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
+# Import professional analyzer
+from pro_analyzer import deep_analyze_signal, format_deep_analysis
+
 # MongoDB
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -298,7 +301,7 @@ async def send_to_users(text: str):
             logger.error(f"Failed to send to {user['chat_id']}: {e}")
 
 async def process_signal(text: str):
-    """Process incoming signal"""
+    """Process incoming signal with deep analysis"""
     signal = parse_signal(text)
     if not signal:
         logger.info(f"Could not parse: {text[:50]}...")
@@ -306,11 +309,8 @@ async def process_signal(text: str):
     
     logger.info(f"📊 New signal: {signal['direction']} {signal['symbol']}")
     
-    # Get market data
-    market_data = await get_market_data(signal['symbol'])
-    
-    # AI analysis
-    ai_result = await analyze_with_ai(signal, market_data)
+    # Deep professional analysis (news, sentiment, technicals)
+    analysis = await deep_analyze_signal(signal)
     
     # Save to database
     doc = {
@@ -322,19 +322,18 @@ async def process_signal(text: str):
         "take_profit": signal['take_profit'],
         "stop_loss": signal['stop_loss'],
         "rr_ratio": signal['rr_ratio'],
-        "status": "accepted" if ai_result.get('decision') == 'ACCEPT' else "rejected",
-        "ai_analysis": ai_result,
-        "market_data": market_data,
+        "status": "accepted" if analysis.get('decision') == 'ACCEPT' else "rejected",
+        "ai_analysis": analysis,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": "auto_cvizor"
     }
     await db.signals.insert_one(doc)
     
     # Format and send
-    result_text = format_result(signal, market_data, ai_result)
+    result_text = format_deep_analysis(signal, analysis)
     await send_to_users(result_text)
     
-    logger.info(f"✅ Signal processed: {ai_result.get('decision')}")
+    logger.info(f"✅ Signal processed: {analysis.get('decision')}")
 
 async def main():
     logger.info("🚀 Starting Auto Signal Monitor...")

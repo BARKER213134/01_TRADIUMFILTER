@@ -22,6 +22,9 @@ import pandas as pd
 import ta
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
+# Import professional analyzer
+from pro_analyzer import deep_analyze_signal, format_deep_analysis
+
 # MongoDB
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -379,16 +382,17 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Send "analyzing" message
     processing_msg = await update.message.reply_text(
-        f"🔄 Анализирую <b>{signal['symbol']}</b>...",
+        f"🔄 <b>Глубокий анализ {signal['symbol']}...</b>\n\n"
+        f"📊 Собираю технические данные...\n"
+        f"📰 Ищу новости...\n"
+        f"🐦 Анализирую настроения...\n"
+        f"🤖 AI обрабатывает...",
         parse_mode='HTML'
     )
     
     try:
-        # Get market data
-        market_data = await get_market_data(signal['symbol'])
-        
-        # AI analysis
-        ai_result = await analyze_with_ai(signal, market_data)
+        # Deep professional analysis
+        analysis = await deep_analyze_signal(signal)
         
         # Save to database
         doc = {
@@ -400,9 +404,8 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "take_profit": signal['take_profit'],
             "stop_loss": signal['stop_loss'],
             "rr_ratio": signal['rr_ratio'],
-            "status": "accepted" if ai_result.get('decision') == 'ACCEPT' else "rejected",
-            "ai_analysis": ai_result,
-            "market_data": market_data,
+            "status": "accepted" if analysis.get('decision') == 'ACCEPT' else "rejected",
+            "ai_analysis": analysis,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "telegram",
             "chat_id": update.message.chat_id
@@ -410,7 +413,7 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.signals.insert_one(doc)
         
         # Format and send result
-        result_text = format_result(signal, market_data, ai_result)
+        result_text = format_deep_analysis(signal, analysis)
         await processing_msg.edit_text(result_text, parse_mode='HTML')
         
     except Exception as e:
