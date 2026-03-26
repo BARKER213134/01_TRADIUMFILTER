@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Update, Bot
+from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # AI and Market Data
@@ -325,6 +325,16 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
     return msg.strip()
 
 # Bot handlers
+# Main keyboard
+main_keyboard = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("📋 Сигналы"), KeyboardButton("🎯 Вход")],
+        [KeyboardButton("📈 Статистика")]
+    ],
+    resize_keyboard=True
+)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     chat_id = update.message.chat_id
@@ -338,13 +348,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "👋 <b>AI Signal Screener</b>\n\n"
-        "📊 <b>Команды:</b>\n"
-        "/signals - 📋 Обзор сигналов (анализ)\n"
-        "/entries - 🎯 Сигналы входа (когда входить)\n"
-        "/stats - 📈 Статистика\n\n"
-        "💡 Просто перешли мне сигнал для анализа\n\n"
-        "🔔 Ты подписан на уведомления!",
-        parse_mode='HTML'
+        "🔔 Ты подписан на уведомления!\n\n"
+        "💡 Перешли мне сигнал для анализа",
+        parse_mode='HTML',
+        reply_markup=main_keyboard
     )
 
 
@@ -355,7 +362,7 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ).sort("timestamp", -1).limit(5).to_list(5)
     
     if not signals:
-        await update.message.reply_text("📋 Нет сигналов пока")
+        await update.message.reply_text("📋 Нет сигналов пока", reply_markup=main_keyboard)
         return
     
     text = "📋 <b>ОБЗОР СИГНАЛОВ</b>\n\n"
@@ -371,7 +378,7 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text += "💡 Перешли сигнал для детального анализа"
     
-    await update.message.reply_text(text, parse_mode='HTML')
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
 
 
 async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -393,7 +400,7 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"⏳ Ожидают входа: {pending} сигналов\n"
         text += "Уведомлю когда цена достигнет точки входа!"
         
-        await update.message.reply_text(text, parse_mode='HTML')
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
         return
     
     text = "🎯 <b>АКТИВНЫЕ СИГНАЛЫ ВХОДА</b>\n\n"
@@ -415,7 +422,7 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         win_rate = (tp_count / (tp_count + sl_count)) * 100
         text += f"📊 Win Rate: {win_rate:.0f}% ({tp_count}W / {sl_count}L)"
     
-    await update.message.reply_text(text, parse_mode='HTML')
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -443,7 +450,22 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ├ SL достигнут: {sl_hit} ❌
 └ Win Rate: {win_rate:.0f}%"""
 
-    await update.message.reply_text(text, parse_mode='HTML')
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+
+
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle keyboard button presses"""
+    text = update.message.text
+    
+    if text == "📋 Сигналы":
+        await signals_command(update, context)
+    elif text == "🎯 Вход":
+        await entries_command(update, context)
+    elif text == "📈 Статистика":
+        await stats_command(update, context)
+    else:
+        # It's a signal to analyze
+        await analyze_message(update, context)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
@@ -539,6 +561,7 @@ def main():
     application.add_handler(CommandHandler("signals", signals_command))
     application.add_handler(CommandHandler("entries", entries_command))
     application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(MessageHandler(filters.Regex(r'^(📋 Сигналы|🎯 Вход|📈 Статистика)$'), handle_buttons))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_message))
     application.add_handler(MessageHandler(filters.FORWARDED, analyze_message))
     
