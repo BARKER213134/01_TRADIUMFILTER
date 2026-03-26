@@ -340,14 +340,22 @@ def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
 # Bot handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
+    chat_id = update.message.chat_id
+    
+    # Save user to database for notifications
+    await db.bot_users.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"chat_id": chat_id, "registered": datetime.now(timezone.utc).isoformat()}},
+        upsert=True
+    )
+    
     await update.message.reply_text(
         "👋 Привет! Я анализирую торговые сигналы с помощью AI.\n\n"
         "📨 <b>Как использовать:</b>\n"
-        "Просто перешли мне сообщение с сигналом, и я проанализирую его.\n\n"
-        "📝 <b>Поддерживаемые форматы:</b>\n"
-        "<code>BUY BTCUSDT @ 95000, TP: 96000, SL: 94500</code>\n"
-        "<code>LONG ETHUSDT Entry: 3200 TP: 3400 SL: 3100</code>\n\n"
-        "🔍 Я проверю R:R ratio, тренд, RSI и объёмы через Binance.",
+        "• Перешли мне сообщение с сигналом\n"
+        "• Или жди автоматических сигналов от @cvizor_bot\n\n"
+        "🔔 <b>Ты подписан на автоматические уведомления!</b>\n"
+        "Когда придёт новый сигнал — я его проанализирую и пришлю результат.",
         parse_mode='HTML'
     )
 
