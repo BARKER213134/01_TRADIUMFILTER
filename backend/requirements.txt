@@ -1,3 +1,4 @@
+aiodns==4.0.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.3
 aiosignal==1.4.0
@@ -6,14 +7,17 @@ annotated-types==0.7.0
 anyio==4.13.0
 attrs==26.1.0
 bcrypt==4.1.3
+binance-connector==3.12.0
 binance-futures-connector==4.1.0
 black==26.3.1
 boto3==1.42.75
 botocore==1.42.75
+ccxt==4.5.45
 certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.6
 click==8.3.1
+coincurve==21.0.0
 cryptography==46.0.5
 distro==1.9.0
 dnspython==2.8.0
@@ -78,6 +82,8 @@ protobuf==5.29.6
 pyaes==1.6.1
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
+pybit==5.14.0
+pycares==5.0.1
 pycodestyle==2.14.0
 pycparser==3.0
 pycryptodome==3.23.0

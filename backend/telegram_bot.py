@@ -16,10 +16,7 @@ from dotenv import load_dotenv
 from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# AI and Market Data
-from binance.um_futures import UMFutures
-import pandas as pd
-import ta
+# AI
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # Import professional analyzer
@@ -43,9 +40,6 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'test_database')
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
-
-# Binance client
-binance_client = UMFutures()
 
 # Bot token
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -197,94 +191,6 @@ def parse_signal(text: str) -> dict | None:
         "rr_ratio": round(rr_ratio, 2),
         "signal_type": signal_type
     }
-
-async def get_market_data(symbol: str) -> dict:
-    """Fetch market data from Binance Futures"""
-    try:
-        klines = binance_client.klines(symbol=symbol, interval='1h', limit=100)
-        
-        if not klines:
-            logger.warning(f"No klines data for {symbol}")
-            return {"current_price": 0, "rsi": 50, "trend": "UNKNOWN", "volume_ratio": 1}
-        
-        df = pd.DataFrame(klines, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-            'taker_buy_quote', 'ignore'
-        ])
-        
-        df['close'] = pd.to_numeric(df['close'])
-        df['high'] = pd.to_numeric(df['high'])
-        df['low'] = pd.to_numeric(df['low'])
-        df['volume'] = pd.to_numeric(df['volume'])
-        
-        df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        df['ema20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
-        df['ema50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
-        
-        current = df.iloc[-1]
-        avg_volume = df['volume'].rolling(20).mean().iloc[-1]
-        
-        trend = "BULLISH" if current['ema20'] > current['ema50'] else "BEARISH"
-        
-        return {
-            "current_price": float(current['close']),
-            "rsi": float(current['rsi']) if pd.notna(current['rsi']) else 50,
-            "trend": trend,
-            "volume_ratio": float(current['volume'] / avg_volume) if avg_volume > 0 else 1,
-        }
-    except Exception as e:
-        logger.error(f"Error fetching market data for {symbol}: {e}")
-        return {"current_price": 0, "rsi": 50, "trend": "UNKNOWN", "volume_ratio": 1}
-
-async def analyze_with_ai(signal: dict, market_data: dict) -> dict:
-    """Analyze signal with GPT-5.2"""
-    try:
-        api_key = os.environ.get('EMERGENT_LLM_KEY')
-        if not api_key:
-            return {"decision": "SKIP", "reasoning": "API key not configured"}
-        
-        # Get settings from DB
-        settings = await db.settings.find_one({}, {"_id": 0})
-        if not settings:
-            settings = {"min_rr_ratio": 2.0, "min_volume_multiplier": 1.5, "trend_alignment_required": True}
-        
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"tg-signal-{signal.get('symbol', 'unknown')}-{datetime.now().timestamp()}",
-            system_message="""Ты эксперт по криптотрейдингу. Анализируй сигналы кратко.
-            
-Отвечай ТОЛЬКО JSON: {"decision": "ACCEPT" или "REJECT", "confidence": 0-100, "reasoning": "1-2 предложения на русском"}"""
-        ).with_model("openai", "gpt-5.2")
-        
-        prompt = f"""Analyze this trading signal:
-
-SIGNAL: {signal['direction']} {signal['symbol']}
-Entry: {signal['entry_price']} | TP: {signal['take_profit']} | SL: {signal['stop_loss']}
-R:R Ratio: {signal['rr_ratio']}
-
-MARKET:
-Price: {market_data.get('current_price', 'N/A')} | RSI: {market_data.get('rsi', 'N/A'):.1f}
-Trend: {market_data.get('trend', 'N/A')} | Volume: {market_data.get('volume_ratio', 1):.1f}x avg
-
-RULES: Min R:R {settings.get('min_rr_ratio', 2.0)}, Trend align: {settings.get('trend_alignment_required', True)}
-
-Quick analysis - respond with JSON only."""
-
-        response = await chat.send_message(UserMessage(text=prompt))
-        
-        try:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
-        except json.JSONDecodeError:
-            pass
-        
-        return {"decision": "SKIP", "reasoning": "Could not parse AI response"}
-        
-    except Exception as e:
-        logger.error(f"AI analysis error: {e}")
-        return {"decision": "SKIP", "reasoning": "AI analysis failed", "confidence": 0}
 
 def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
     """Format analysis result for Telegram"""

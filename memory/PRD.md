@@ -1,71 +1,59 @@
 # AI Trading Signal Screener - PRD
 
 ## Original Problem Statement
-Создать Telegram бота для фильтрации и AI-анализа торговых сигналов. Бот должен читать сигналы из закрытого Telegram бота (через Telethon user account), анализировать их с помощью GPT-5.2 используя данные Binance Futures, и отправлять отфильтрованные сигналы.
+Создать Telegram бота для фильтрации и AI-анализа торговых сигналов. Бот читает сигналы из закрытого бота @cvizor_bot (через Telethon user account), анализирует с помощью GPT-5.2 (технический анализ, новости, R:R, объёмы через Kraken/CoinGecko), и отправляет отфильтрованные сигналы пользователю.
 
-## User Personas
-- **Трейдер**: Получает сигналы от разных источников, хочет автоматически фильтровать их по качеству
-- **Администратор**: Настраивает параметры фильтрации и управляет ботом
+## Architecture
+- **signal_monitor.py** (Supervisor): Telethon клиент → читает @cvizor_bot → анализирует через pro_analyzer → шлёт результат в Telegram
+- **telegram_bot.py** (Supervisor): Пользовательский бот @cryptosignal1mybot → команды /start /signals /entries /stats + ручной анализ
+- **entry_monitor.py** (Supervisor): Фоновый цикл → проверяет цены через Kraken/OKX → алертит при достижении точки входа / TP / SL
+- **pro_analyzer.py**: Модуль глубокого AI анализа (технический + новости + сентимент + CoinGecko)
+- **server.py**: FastAPI API для веб-дашборда
+- Frontend: React + Shadcn UI дашборд
 
-## Core Requirements (Static)
-1. Чтение сигналов из Telegram (Telethon MTProto API)
-2. Анализ с GPT-5.2 (технический анализ, R/R, тренд)
-3. Данные с Binance Futures (OHLCV, объемы, индикаторы)
-4. Фильтрация по критериям (min R/R, объемы, тренд)
-5. Dashboard со статистикой
-6. Настройки через веб-интерфейс
+## What's Been Implemented
+### Done (26 Jan - 26 Mar 2026)
+- ✅ FastAPI + React + MongoDB архитектура
+- ✅ GPT-5.2 интеграция через emergentintegrations (Emergent LLM Key)
+- ✅ Telethon автоматическое чтение @cvizor_bot (авторизация через 2FA)
+- ✅ Парсинг 5+ форматов сигналов (emoji, пробои, RSI)
+- ✅ pro_analyzer.py: глубокий AI анализ (технический + новости + сентимент)
+- ✅ entry_monitor.py: мониторинг цен + алерты TP/SL
+- ✅ Миграция с Binance (451 blocked) → Kraken + CoinGecko + OKX fallback
+- ✅ Telegram бот с кнопками: Сигналы, Вход, Статистика
+- ✅ Веб-дашборд со статистикой
 
-## What's Been Implemented (26 Jan 2026)
-### Backend
-- ✅ FastAPI сервер с MongoDB
-- ✅ GPT-5.2 интеграция через emergentintegrations
-- ✅ Binance Futures API для рыночных данных
-- ✅ Технические индикаторы (RSI, EMA, MACD, Bollinger Bands)
-- ✅ Парсинг сигналов (множественные форматы)
-- ✅ AI анализ с структурированным ответом
-- ✅ CRUD для сигналов и настроек
-- ✅ Статистика и данные для графиков
+### Fixed (26 Mar 2026)
+- ✅ **Supervisor конфигурации** для telegram_bot, signal_monitor, entry_monitor — процессы автоматически перезапускаются
+- ✅ **Удалён Binance** из всех файлов (telegram_bot.py, signal_monitor.py, server.py) → заменён на ccxt/Kraken
+- ✅ **Telethon сессия** жива — бот подключен к @cvizor_bot и ожидает сигналы
+- ✅ Очистка ненужных файлов (telethon_auth.py, tg_step*.py)
 
-### Frontend
-- ✅ Dashboard с KPI карточками
-- ✅ График статистики за 7 дней (Recharts)
-- ✅ Таблица сигналов с AI confidence
-- ✅ Ручной анализ сигналов
-- ✅ Страница настроек (Telegram, фильтры)
-- ✅ Переключатель статуса бота
-
-### Integrations
+## Integrations
 - ✅ GPT-5.2 (OpenAI via Emergent LLM Key)
-- ✅ Binance Futures API (market data)
-- ⏸️ Telethon (configured, requires user API credentials)
-- ⏸️ Telegram Bot (configured, token provided)
+- ✅ Telegram Bot API (token в .env)
+- ✅ Telethon (Telegram User API)
+- ✅ Kraken API (CCXT, публичный)
+- ✅ CoinGecko API (публичный)
+- ✅ OKX API (CCXT fallback, публичный)
 
 ## Prioritized Backlog
 
-### P0 (Critical)
-- [x] AI signal analysis
-- [x] Market data from Binance
-- [x] Web dashboard
-- [x] Settings management
-
 ### P1 (High)
-- [ ] Telethon live signal monitoring (requires user's my.telegram.org credentials)
-- [ ] Telegram bot notifications for filtered signals
-- [ ] Real-time WebSocket updates
+- [ ] Webhook для автоматической торговли ("потом будем делать под вебхук")
 
 ### P2 (Medium)
-- [ ] Historical performance tracking (did signal hit TP/SL?)
+- [ ] Добавить MEXC/KuCoin для редких альткоинов
+- [ ] Historical performance tracking (TP/SL результаты)
 - [ ] Multiple signal source chats
-- [ ] Custom AI prompts per symbol
+- [ ] Real-time WebSocket обновления на дашборде
+
+### P3 (Low)
+- [ ] Custom AI промпты по символу
 - [ ] Backtesting mode
 
-## Next Tasks
-1. Получить Telegram API ID и Hash от пользователя (my.telegram.org)
-2. Реализовать live мониторинг через Telethon
-3. Настроить отправку отфильтрованных сигналов в бот
-4. Добавить WebSocket для real-time обновлений на dashboard
-
 ## Technical Notes
-- Binance API может быть недоступен в некоторых регионах (error 451)
-- AI анализ работает даже без рыночных данных (с ограниченной точностью)
-- Telegram Bot Token: `8558977408:AAHDyFx9KR-_u-apKjPH6wgeYq_qln2YX3U`
+- Binance API заблокирован (Error 451) — используем Kraken/OKX
+- Telegram 2FA пароль: 1240Maxim
+- Bot Token: 8558977408:AAHDyFx9KR-_u-apKjPH6wgeYq_qln2YX3U
+- Telethon сессия: /app/backend/telethon_session.session

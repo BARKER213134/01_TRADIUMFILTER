@@ -13,10 +13,8 @@ import asyncio
 import re
 import json
 
-# Binance Futures
-from binance.um_futures import UMFutures
-
-# Technical Analysis
+# Technical Analysis via CCXT (Kraken - works globally)
+import ccxt
 import pandas as pd
 import ta
 
@@ -31,8 +29,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Binance client (public, no auth needed for market data)
-binance_client = UMFutures()
+# Exchange client (Kraken - works globally without restrictions)
+exchange = ccxt.kraken({'enableRateLimit': True})
 
 # Create the main app
 app = FastAPI()
@@ -172,46 +170,52 @@ def parse_signal(text: str) -> Optional[Dict]:
     return None
 
 async def get_market_data(symbol: str) -> Dict:
-    """Fetch market data from Binance Futures"""
+    """Fetch market data from Kraken/OKX via CCXT"""
     try:
-        # Get klines (OHLCV)
-        klines = binance_client.klines(symbol=symbol, interval='1h', limit=100)
+        base = symbol.replace("USDT", "").replace("PERP", "").upper()
         
-        df = pd.DataFrame(klines, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-            'taker_buy_quote', 'ignore'
-        ])
+        klines = None
+        for sym in [f"{base}/USD", f"{base}/USDT"]:
+            try:
+                klines = exchange.fetch_ohlcv(sym, '1h', limit=100)
+                if klines and len(klines) > 20:
+                    break
+            except:
+                continue
         
-        df['close'] = pd.to_numeric(df['close'])
-        df['high'] = pd.to_numeric(df['high'])
-        df['low'] = pd.to_numeric(df['low'])
-        df['volume'] = pd.to_numeric(df['volume'])
+        if not klines or len(klines) < 20:
+            # Fallback to OKX
+            try:
+                okx = ccxt.okx({'enableRateLimit': True})
+                klines = okx.fetch_ohlcv(f"{base}/USDT", '1h', limit=100)
+            except:
+                pass
+        
+        if not klines or len(klines) < 20:
+            return {}
+        
+        df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = pd.to_numeric(df[col])
         
         # Calculate indicators
         df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
         df['ema20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
         df['ema50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
         
-        # Bollinger Bands
         bb = ta.volatility.BollingerBands(df['close'], window=20)
         df['bb_upper'] = bb.bollinger_hband()
         df['bb_lower'] = bb.bollinger_lband()
         
-        # MACD
         macd = ta.trend.MACD(df['close'])
         df['macd'] = macd.macd()
         df['macd_signal'] = macd.macd_signal()
         
-        # Get current values
         current = df.iloc[-1]
-        prev = df.iloc[-2]
         avg_volume = df['volume'].rolling(20).mean().iloc[-1]
         
-        # Determine trend
         trend = "BULLISH" if current['ema20'] > current['ema50'] else "BEARISH"
-        
-        # Support/Resistance (simple: last 20 candles high/low)
         recent_high = df['high'].tail(20).max()
         recent_low = df['low'].tail(20).min()
         
