@@ -337,14 +337,113 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(
-        "👋 Привет! Я анализирую торговые сигналы с помощью AI.\n\n"
-        "📨 <b>Как использовать:</b>\n"
-        "• Перешли мне сообщение с сигналом\n"
-        "• Или жди автоматических сигналов от @cvizor_bot\n\n"
-        "🔔 <b>Ты подписан на автоматические уведомления!</b>\n"
-        "Когда придёт новый сигнал — я его проанализирую и пришлю результат.",
+        "👋 <b>AI Signal Screener</b>\n\n"
+        "📊 <b>Команды:</b>\n"
+        "/signals - 📋 Обзор сигналов (анализ)\n"
+        "/entries - 🎯 Сигналы входа (когда входить)\n"
+        "/stats - 📈 Статистика\n\n"
+        "💡 Просто перешли мне сигнал для анализа\n\n"
+        "🔔 Ты подписан на уведомления!",
         parse_mode='HTML'
     )
+
+
+async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show recent signal analysis"""
+    signals = await db.signals.find(
+        {}, {"_id": 0}
+    ).sort("timestamp", -1).limit(5).to_list(5)
+    
+    if not signals:
+        await update.message.reply_text("📋 Нет сигналов пока")
+        return
+    
+    text = "📋 <b>ОБЗОР СИГНАЛОВ</b>\n\n"
+    
+    for s in signals:
+        status_emoji = "✅" if s.get('status') == 'accepted' else "❌"
+        dir_emoji = "🟢" if s.get('direction') == 'BUY' else "🔴"
+        confidence = s.get('ai_analysis', {}).get('confidence', 0)
+        
+        text += f"{status_emoji} {dir_emoji} <b>{s.get('symbol', '?')}</b>\n"
+        text += f"├ Вход: {s.get('entry_price', '?')} | R:R: {s.get('rr_ratio', '?')}\n"
+        text += f"└ AI: {confidence}% | {s.get('status', '?').upper()}\n\n"
+    
+    text += "💡 Перешли сигнал для детального анализа"
+    
+    await update.message.reply_text(text, parse_mode='HTML')
+
+
+async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show entry signals"""
+    # Get active entry signals
+    entries = await db.entry_signals.find(
+        {"status": "OPEN"}, {"_id": 0}
+    ).sort("triggered_at", -1).limit(10).to_list(10)
+    
+    if not entries:
+        # Check for pending signals
+        pending = await db.signals.count_documents({
+            "status": "accepted",
+            "entry_triggered": {"$ne": True}
+        })
+        
+        text = "🎯 <b>СИГНАЛЫ ВХОДА</b>\n\n"
+        text += "Нет активных сигналов входа\n\n"
+        text += f"⏳ Ожидают входа: {pending} сигналов\n"
+        text += "Уведомлю когда цена достигнет точки входа!"
+        
+        await update.message.reply_text(text, parse_mode='HTML')
+        return
+    
+    text = "🎯 <b>АКТИВНЫЕ СИГНАЛЫ ВХОДА</b>\n\n"
+    
+    for e in entries:
+        dir_emoji = "🟢 LONG" if e.get('direction') == 'BUY' else "🔴 SHORT"
+        
+        text += f"{dir_emoji} <b>{e.get('symbol', '?')}</b>\n"
+        text += f"├ Вход: <code>{e.get('entry_price', '?')}</code>\n"
+        text += f"├ TP: <code>{e.get('take_profit', '?')}</code>\n"
+        text += f"├ SL: <code>{e.get('stop_loss', '?')}</code>\n"
+        text += f"└ R:R: {e.get('rr_ratio', '?')}\n\n"
+    
+    # Show closed signals stats
+    tp_count = await db.entry_signals.count_documents({"status": "TP_HIT"})
+    sl_count = await db.entry_signals.count_documents({"status": "SL_HIT"})
+    
+    if tp_count + sl_count > 0:
+        win_rate = (tp_count / (tp_count + sl_count)) * 100
+        text += f"📊 Win Rate: {win_rate:.0f}% ({tp_count}W / {sl_count}L)"
+    
+    await update.message.reply_text(text, parse_mode='HTML')
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show statistics"""
+    total = await db.signals.count_documents({})
+    accepted = await db.signals.count_documents({"status": "accepted"})
+    rejected = await db.signals.count_documents({"status": "rejected"})
+    
+    entries_open = await db.entry_signals.count_documents({"status": "OPEN"})
+    tp_hit = await db.entry_signals.count_documents({"status": "TP_HIT"})
+    sl_hit = await db.entry_signals.count_documents({"status": "SL_HIT"})
+    
+    win_rate = (tp_hit / (tp_hit + sl_hit) * 100) if (tp_hit + sl_hit) > 0 else 0
+    
+    text = f"""📈 <b>СТАТИСТИКА</b>
+
+📋 <b>Сигналы:</b>
+├ Всего: {total}
+├ Принято: {accepted}
+└ Отклонено: {rejected}
+
+🎯 <b>Входы:</b>
+├ Открытые: {entries_open}
+├ TP достигнут: {tp_hit} ✅
+├ SL достигнут: {sl_hit} ❌
+└ Win Rate: {win_rate:.0f}%"""
+
+    await update.message.reply_text(text, parse_mode='HTML')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
@@ -437,6 +536,9 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("signals", signals_command))
+    application.add_handler(CommandHandler("entries", entries_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_message))
     application.add_handler(MessageHandler(filters.FORWARDED, analyze_message))
     
