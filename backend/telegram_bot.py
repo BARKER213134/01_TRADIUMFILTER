@@ -174,6 +174,10 @@ async def get_market_data(symbol: str) -> dict:
     try:
         klines = binance_client.klines(symbol=symbol, interval='1h', limit=100)
         
+        if not klines:
+            logger.warning(f"No klines data for {symbol}")
+            return {"current_price": 0, "rsi": 50, "trend": "UNKNOWN", "volume_ratio": 1}
+        
         df = pd.DataFrame(klines, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_volume', 'trades', 'taker_buy_base',
@@ -189,34 +193,20 @@ async def get_market_data(symbol: str) -> dict:
         df['ema20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
         df['ema50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
         
-        bb = ta.volatility.BollingerBands(df['close'], window=20)
-        df['bb_upper'] = bb.bollinger_hband()
-        df['bb_lower'] = bb.bollinger_lband()
-        
-        macd = ta.trend.MACD(df['close'])
-        df['macd'] = macd.macd()
-        df['macd_signal'] = macd.macd_signal()
-        
         current = df.iloc[-1]
         avg_volume = df['volume'].rolling(20).mean().iloc[-1]
         
         trend = "BULLISH" if current['ema20'] > current['ema50'] else "BEARISH"
-        recent_high = df['high'].tail(20).max()
-        recent_low = df['low'].tail(20).min()
         
         return {
             "current_price": float(current['close']),
             "rsi": float(current['rsi']) if pd.notna(current['rsi']) else 50,
-            "ema20": float(current['ema20']) if pd.notna(current['ema20']) else 0,
-            "ema50": float(current['ema50']) if pd.notna(current['ema50']) else 0,
             "trend": trend,
             "volume_ratio": float(current['volume'] / avg_volume) if avg_volume > 0 else 1,
-            "support": float(recent_low),
-            "resistance": float(recent_high)
         }
     except Exception as e:
         logger.error(f"Error fetching market data for {symbol}: {e}")
-        return {}
+        return {"current_price": 0, "rsi": 50, "trend": "UNKNOWN", "volume_ratio": 1}
 
 async def analyze_with_ai(signal: dict, market_data: dict) -> dict:
     """Analyze signal with GPT-5.2"""
@@ -271,7 +261,7 @@ Quick analysis - respond with JSON only."""
         
     except Exception as e:
         logger.error(f"AI analysis error: {e}")
-        return {"decision": "SKIP", "reasoning": str(e)}
+        return {"decision": "SKIP", "reasoning": "AI analysis failed", "confidence": 0}
 
 def format_result(signal: dict, market_data: dict, ai_result: dict) -> str:
     """Format analysis result for Telegram"""
