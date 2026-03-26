@@ -121,6 +121,8 @@ def parse_signal(text: str) -> Optional[Dict]:
         r'(BUY|SELL|LONG|SHORT)\s+([A-Z0-9]+)\s*@?\s*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
         # Format: BTCUSDT BUY Entry: 95000 TP: 96000 SL: 94500
         r'([A-Z0-9]+)\s+(BUY|SELL|LONG|SHORT).*?ENTRY[:\s]*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
+        # Format: LONG ADAUSDT Entry: 0.45 TP: 0.48 SL: 0.42
+        r'(LONG|SHORT|BUY|SELL)\s+([A-Z0-9]+).*?ENTRY[:\s]*([\d.]+).*?TP[:\s]*([\d.]+).*?SL[:\s]*([\d.]+)',
         # Format: Signal: LONG BTCUSDT 95000-96000-94500
         r'(LONG|SHORT|BUY|SELL)\s+([A-Z0-9]+)\s+([\d.]+)[\s\-]+([\d.]+)[\s\-]+([\d.]+)',
     ]
