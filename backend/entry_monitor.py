@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Entry Point Monitor v2
-Watches price and alerts when entry price is reached
-Готов для вебхука автоматической торговли
+Entry Monitor v3
+Monitors price and sends beautiful alerts when DCA #4 is reached
+Sends chart image with the notification
 """
 
 import asyncio
@@ -10,7 +10,6 @@ import os
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 from telegram import Bot
@@ -23,324 +22,344 @@ load_dotenv(ROOT_DIR / '.env')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Config
-BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-db_name = os.environ.get('DB_NAME', 'test_database')
+BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+mongo_url = os.environ.get('MONGO_URL')
+db_name = os.environ.get('DB_NAME')
 
-# MongoDB
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
 
-# Exchange for price data
 exchange = ccxt.kraken({'enableRateLimit': True})
-
-# Telegram bot
 bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
 
-# Cache for prices
 price_cache = {}
 
 
-async def get_current_price(symbol: str) -> float:
-    """Get current price from exchange with caching"""
+async def get_price(symbol: str) -> float:
+    """Get current price with caching (5s)"""
     base = symbol.replace("USDT", "").replace("PERP", "").upper()
-    
-    # Check cache (valid for 5 seconds)
-    cache_key = base
-    if cache_key in price_cache:
-        cached_time, cached_price = price_cache[cache_key]
+
+    if base in price_cache:
+        cached_time, cached_price = price_cache[base]
         if (datetime.now() - cached_time).seconds < 5:
             return cached_price
-    
-    try:
-        for sym in [f"{base}/USD", f"{base}/USDT"]:
-            try:
-                ticker = exchange.fetch_ticker(sym)
-                if ticker and ticker.get('last'):
-                    price = float(ticker['last'])
-                    price_cache[cache_key] = (datetime.now(), price)
-                    return price
-            except:
-                continue
-        
-        # Fallback to OKX
+
+    for sym in [f"{base}/USD", f"{base}/USDT"]:
         try:
-            okx = ccxt.okx({'enableRateLimit': True})
-            ticker = okx.fetch_ticker(f"{base}/USDT")
+            ticker = exchange.fetch_ticker(sym)
             if ticker and ticker.get('last'):
                 price = float(ticker['last'])
-                price_cache[cache_key] = (datetime.now(), price)
+                price_cache[base] = (datetime.now(), price)
                 return price
         except:
-            pass
-            
-    except Exception as e:
-        logger.error(f"Price error {symbol}: {e}")
-    
+            continue
+
+    # Fallback OKX
+    try:
+        okx = ccxt.okx({'enableRateLimit': True})
+        ticker = okx.fetch_ticker(f"{base}/USDT")
+        if ticker and ticker.get('last'):
+            price = float(ticker['last'])
+            price_cache[base] = (datetime.now(), price)
+            return price
+    except:
+        pass
+
     return 0
 
 
-def check_entry_reached(signal: dict, current_price: float) -> Optional[dict]:
-    """
-    Check if entry price has been reached
-    Returns entry data if triggered, None otherwise
-    """
-    if current_price <= 0:
-        return None
-    
-    entry = float(signal['entry_price'])
-    tp = float(signal['take_profit'])
-    sl = float(signal['stop_loss'])
+def format_entry_alert(signal: dict, current_price: float) -> str:
+    """Format beautiful entry alert message"""
     direction = signal['direction']
-    
-    # Tolerance: 0.3% from entry price
-    tolerance = entry * 0.003
-    
-    triggered = False
-    trigger_type = None
-    
-    if direction == 'BUY':
-        # LONG: trigger when price <= entry (or slightly above)
-        if current_price <= entry + tolerance:
-            triggered = True
-            if current_price < entry:
-                trigger_type = "НИЖЕ_ВХОДА"
-            else:
-                trigger_type = "НА_УРОВНЕ"
+    symbol = signal['symbol'].replace('USDT', '')
+    timeframe = signal.get('timeframe', '4h')
+    dca_data = signal.get('dca_data', {})
+    dca4 = signal.get('dca4_level', 0)
+
+    if direction == 'SHORT':
+        dir_icon = "🔴"
+        dir_text = "ШОРТ"
+        action = "SELL"
+        zone_type = "сопротивления"
     else:
-        # SHORT: trigger when price >= entry (or slightly below)
-        if current_price >= entry - tolerance:
-            triggered = True
-            if current_price > entry:
-                trigger_type = "ВЫШЕ_ВХОДА"
-            else:
-                trigger_type = "НА_УРОВНЕ"
-    
-    if not triggered:
-        return None
-    
-    # Calculate actual R:R with current price
-    if direction == 'BUY':
-        risk = current_price - sl
-        reward = tp - current_price
-    else:
-        risk = sl - current_price
-        reward = current_price - tp
-    
-    actual_rr = reward / risk if risk > 0 else 0
-    
-    # Calculate profit/loss distances
-    if direction == 'BUY':
-        tp_distance = ((tp - current_price) / current_price) * 100
-        sl_distance = ((current_price - sl) / current_price) * 100
-    else:
-        tp_distance = ((current_price - tp) / current_price) * 100
-        sl_distance = ((sl - current_price) / current_price) * 100
-    
-    return {
-        "triggered": True,
-        "trigger_type": trigger_type,
-        "current_price": current_price,
-        "entry_price": entry,
-        "actual_rr": round(actual_rr, 2),
-        "tp_distance_pct": round(tp_distance, 2),
-        "sl_distance_pct": round(sl_distance, 2),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+        dir_icon = "🟢"
+        dir_text = "ЛОНГ"
+        action = "BUY"
+        zone_type = "поддержки"
+
+    # Zone info
+    zone_low = dca_data.get('zone_low', '')
+    zone_high = dca_data.get('zone_high', '')
+    zone_text = f"{zone_low} — {zone_high}" if zone_low and zone_high else "N/A"
+
+    # DCA levels display
+    dca_lines = ""
+    for i in range(1, 6):
+        lvl = dca_data.get(f'dca{i}', '')
+        if lvl:
+            marker = " ◀ ВХОД" if i == 4 else ""
+            dca_lines += f"    {'│' if i < 5 else '└'} DCA #{i}: <code>{lvl}</code>{marker}\n"
+
+    # Distance from entry to TP/SL
+    tp = signal.get('take_profit', 0)
+    sl = signal.get('stop_loss', 0)
+    tp_pct = signal.get('tp_pct', 0)
+    sl_pct = signal.get('sl_pct', 0)
+    rr = signal.get('rr_ratio', 0)
+
+    # Trend indicators
+    trend = signal.get('trend', '')
+    ma = signal.get('ma_status', '')
+    rsi = signal.get('rsi_status', '')
+
+    msg = f"""{dir_icon}{dir_icon}{dir_icon} <b>СИГНАЛ ВХОДА — {dir_text}</b> {dir_icon}{dir_icon}{dir_icon}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+<b>${symbol}</b>  •  {timeframe}  •  {action}
+
+📍 <b>Цена достигла DCA #4</b>
+    Текущая: <code>{current_price}</code>
+    DCA #4:  <code>{dca4}</code>
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 <b>Параметры сделки:</b>
+    TP: <code>{tp}</code>  (+{tp_pct}%)
+    SL: <code>{sl}</code>  (-{sl_pct}%)
+    R:R: <code>{rr}</code>
+
+📊 <b>Уровни DCA:</b>
+{dca_lines}
+📐 <b>Зона {zone_type}:</b>
+    {zone_text}
+
+📈 <b>Индикаторы:</b>
+    Тренд: {trend}
+    MA: {ma}  •  RSI: {rsi}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚡️ <b>{action} {symbol}USDT @ {current_price}</b>"""
+
+    return msg.strip()
 
 
-async def send_entry_signal(signal: dict, entry_data: dict):
-    """Send ENTRY signal to users - ready for webhook"""
+def format_tp_sl_alert(signal: dict, current_price: float, result: str) -> str:
+    """Format TP/SL hit alert"""
+    symbol = signal['symbol'].replace('USDT', '')
+    direction = signal['direction']
+    entry = signal.get('trigger_price', signal.get('dca4_level', 0))
+
+    if result == "TP_HIT":
+        icon = "✅"
+        status = "TAKE PROFIT"
+        if direction == 'SHORT':
+            pnl_pct = ((entry - current_price) / entry) * 100 if entry else 0
+        else:
+            pnl_pct = ((current_price - entry) / entry) * 100 if entry else 0
+    else:
+        icon = "❌"
+        status = "STOP LOSS"
+        if direction == 'SHORT':
+            pnl_pct = -((current_price - entry) / entry) * 100 if entry else 0
+        else:
+            pnl_pct = -((entry - current_price) / entry) * 100 if entry else 0
+
+    pnl_sign = "+" if pnl_pct > 0 else ""
+    dir_text = "ШОРТ" if direction == 'SHORT' else "ЛОНГ"
+
+    return f"""{icon}{icon}{icon} <b>{status}</b> {icon}{icon}{icon}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+<b>${symbol}</b>  •  {dir_text}
+
+    Вход: <code>{entry}</code>
+    Закрытие: <code>{current_price}</code>
+    P&L: <b>{pnl_sign}{pnl_pct:.2f}%</b>
+
+━━━━━━━━━━━━━━━━━━━━━━"""
+
+
+async def send_alert(text: str, chart_path: str = None):
+    """Send alert to all registered users"""
     if not bot:
         return
-    
-    direction = signal['direction']
-    dir_emoji = "🟢 LONG" if direction == 'BUY' else "🔴 SHORT"
-    dir_text = "ЛОНГ" if direction == 'BUY' else "ШОРТ"
-    
-    current_price = entry_data['current_price']
-    
-    message = f"""🎯 <b>СИГНАЛ ВХОДА</b>
 
-{dir_emoji} <b>{signal['symbol']}</b>
-
-📍 <b>ВХОД:</b>
-├ Цена сейчас: <code>{current_price}</code>
-├ Целевой вход: <code>{signal['entry_price']}</code>
-├ Статус: {entry_data['trigger_type']}
-
-🎯 <b>ЦЕЛИ:</b>
-├ Take Profit: <code>{signal['take_profit']}</code> (+{entry_data['tp_distance_pct']}%)
-├ Stop Loss: <code>{signal['stop_loss']}</code> (-{entry_data['sl_distance_pct']}%)
-└ R:R: <code>{entry_data['actual_rr']}</code>
-
-⚡️ <b>ДЕЙСТВИЕ: ОТКРЫТЬ {dir_text}</b>
-
-🔗 Webhook данные:
-<code>{{
-  "action": "{direction}",
-  "symbol": "{signal['symbol']}",
-  "price": {current_price},
-  "tp": {signal['take_profit']},
-  "sl": {signal['stop_loss']}
-}}</code>"""
-
-    # Save entry signal to database
-    entry_record = {
-        "signal_id": signal['id'],
-        "symbol": signal['symbol'],
-        "direction": direction,
-        "entry_price": current_price,
-        "take_profit": signal['take_profit'],
-        "stop_loss": signal['stop_loss'],
-        "rr_ratio": entry_data['actual_rr'],
-        "triggered_at": entry_data['timestamp'],
-        "status": "OPEN",
-        "type": "entry_signal"
-    }
-    await db.entry_signals.insert_one(entry_record)
-    
-    # Send to all users
     users = await db.bot_users.find({}, {"_id": 0, "chat_id": 1}).to_list(100)
+
     for user in users:
         try:
-            await bot.send_message(chat_id=user['chat_id'], text=message, parse_mode='HTML')
-            logger.info(f"Entry signal sent for {signal['symbol']}")
+            if chart_path and os.path.exists(chart_path):
+                # Send text first, then chart
+                await bot.send_message(
+                    chat_id=user['chat_id'],
+                    text=text,
+                    parse_mode='HTML'
+                )
+                with open(chart_path, 'rb') as photo:
+                    await bot.send_photo(
+                        chat_id=user['chat_id'],
+                        photo=photo,
+                        caption=f"📊 График сетапа"
+                    )
+            else:
+                await bot.send_message(
+                    chat_id=user['chat_id'],
+                    text=text,
+                    parse_mode='HTML'
+                )
         except Exception as e:
-            logger.error(f"Send error: {e}")
-    
-    # Mark original signal as entry_triggered
-    await db.signals.update_one(
-        {"id": signal['id']},
-        {"$set": {
-            "entry_triggered": True,
-            "entry_trigger_time": entry_data['timestamp'],
-            "entry_trigger_price": current_price
-        }}
-    )
+            logger.error(f"Send error to {user['chat_id']}: {e}")
 
 
-async def check_active_signals():
-    """Check all active signals for entry points"""
-    # Get signals from last 12 hours that:
-    # - Were ACCEPTED by AI
-    # - Haven't been triggered yet
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
-    
+async def check_dca4_entries():
+    """Check if price reached DCA #4 for any watching signals"""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+
     signals = await db.signals.find({
-        "timestamp": {"$gte": cutoff.isoformat()},
-        "status": "accepted",
-        "entry_triggered": {"$ne": True}
+        "status": "watching",
+        "entry_triggered": False,
+        "dca4_level": {"$ne": None},
+        "timestamp": {"$gte": cutoff.isoformat()}
     }, {"_id": 0}).to_list(100)
-    
+
     if signals:
-        logger.info(f"Monitoring {len(signals)} active signals")
-    
+        logger.info(f"👀 Watching {len(signals)} signals for DCA #4 entry")
+
     for signal in signals:
         try:
             symbol = signal.get('symbol', '')
-            if not symbol:
+            dca4 = float(signal.get('dca4_level', 0))
+            direction = signal.get('direction', '')
+
+            if not symbol or dca4 <= 0:
                 continue
-            
-            current_price = await get_current_price(symbol)
-            if current_price <= 0:
+
+            price = await get_price(symbol)
+            if price <= 0:
                 continue
-            
-            entry_data = check_entry_reached(signal, current_price)
-            
-            if entry_data and entry_data['triggered']:
-                logger.info(f"🎯 Entry triggered for {symbol} at {current_price}")
-                await send_entry_signal(signal, entry_data)
-            
+
+            triggered = False
+            tolerance = dca4 * 0.003  # 0.3% tolerance
+
+            if direction == 'SHORT' and price >= dca4 - tolerance:
+                triggered = True
+            elif direction == 'LONG' and price <= dca4 + tolerance:
+                triggered = True
+
+            if triggered:
+                logger.info(f"🎯 DCA#4 HIT! {symbol} {direction} @ {price} (DCA#4={dca4})")
+
+                # Format and send alert
+                alert_text = format_entry_alert(signal, price)
+                chart_path = signal.get('chart_path')
+                await send_alert(alert_text, chart_path)
+
+                # Update signal in DB
+                await db.signals.update_one(
+                    {"id": signal['id']},
+                    {"$set": {
+                        "status": "entered",
+                        "entry_triggered": True,
+                        "trigger_price": price,
+                        "trigger_time": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+
+                # Create entry record for TP/SL tracking
+                await db.entry_signals.insert_one({
+                    "signal_id": signal['id'],
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_price": price,
+                    "dca4_level": dca4,
+                    "take_profit": signal.get('take_profit', 0),
+                    "stop_loss": signal.get('stop_loss', 0),
+                    "rr_ratio": signal.get('rr_ratio', 0),
+                    "chart_path": signal.get('chart_path'),
+                    "triggered_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "OPEN"
+                })
+
         except Exception as e:
             logger.error(f"Check error {signal.get('symbol', '?')}: {e}")
-        
+
         await asyncio.sleep(0.3)
 
 
-async def check_price_targets():
+async def check_tp_sl():
     """Check if open positions hit TP or SL"""
-    # Get open entry signals
-    open_signals = await db.entry_signals.find({
-        "status": "OPEN"
-    }, {"_id": 0}).to_list(100)
-    
+    open_signals = await db.entry_signals.find(
+        {"status": "OPEN"}, {"_id": 0}
+    ).to_list(100)
+
     for signal in open_signals:
         try:
             symbol = signal.get('symbol', '')
-            current_price = await get_current_price(symbol)
-            if current_price <= 0:
+            price = await get_price(symbol)
+            if price <= 0:
                 continue
-            
-            tp = float(signal['take_profit'])
-            sl = float(signal['stop_loss'])
-            direction = signal['direction']
-            
+
+            tp = float(signal.get('take_profit', 0))
+            sl = float(signal.get('stop_loss', 0))
+            direction = signal.get('direction', '')
+
             result = None
-            
-            if direction == 'BUY':
-                if current_price >= tp:
+            if direction == 'SHORT':
+                if tp > 0 and price <= tp:
                     result = "TP_HIT"
-                elif current_price <= sl:
+                elif sl > 0 and price >= sl:
                     result = "SL_HIT"
-            else:
-                if current_price <= tp:
+            elif direction == 'LONG':
+                if tp > 0 and price >= tp:
                     result = "TP_HIT"
-                elif current_price >= sl:
+                elif sl > 0 and price <= sl:
                     result = "SL_HIT"
-            
+
             if result:
-                emoji = "✅" if result == "TP_HIT" else "❌"
-                status_text = "TAKE PROFIT" if result == "TP_HIT" else "STOP LOSS"
-                
-                message = f"""{emoji} <b>{status_text} ДОСТИГНУТ</b>
+                alert_text = format_tp_sl_alert(signal, price, result)
+                await send_alert(alert_text)
 
-{signal['symbol']} | {'LONG' if direction == 'BUY' else 'SHORT'}
-├ Вход: <code>{signal['entry_price']}</code>
-├ Текущая: <code>{current_price}</code>
-└ Результат: <b>{status_text}</b>"""
-
-                # Update status
                 await db.entry_signals.update_one(
                     {"signal_id": signal['signal_id']},
-                    {"$set": {"status": result, "closed_at": datetime.now(timezone.utc).isoformat(), "close_price": current_price}}
+                    {"$set": {
+                        "status": result,
+                        "closed_at": datetime.now(timezone.utc).isoformat(),
+                        "close_price": price
+                    }}
                 )
-                
-                # Notify users
-                users = await db.bot_users.find({}, {"_id": 0, "chat_id": 1}).to_list(100)
-                for user in users:
-                    try:
-                        await bot.send_message(chat_id=user['chat_id'], text=message, parse_mode='HTML')
-                    except:
-                        pass
-                
-                logger.info(f"{emoji} {symbol} {result} at {current_price}")
-                
+
+                await db.signals.update_one(
+                    {"id": signal['signal_id']},
+                    {"$set": {"status": result.lower()}}
+                )
+
+                logger.info(f"{'✅' if result == 'TP_HIT' else '❌'} {symbol} {result} @ {price}")
+
         except Exception as e:
-            logger.error(f"Target check error: {e}")
+            logger.error(f"TP/SL check error: {e}")
 
 
 async def main():
     """Main monitoring loop"""
-    logger.info("🎯 Entry Monitor v2 started")
-    
+    logger.info("🎯 Entry Monitor v3 started — watching for DCA #4 levels")
+
     check_counter = 0
-    
+
     while True:
         try:
-            # Check entry points every 10 seconds
-            await check_active_signals()
-            
-            # Check TP/SL every 30 seconds
+            await check_dca4_entries()
+
             check_counter += 1
             if check_counter >= 3:
-                await check_price_targets()
+                await check_tp_sl()
                 check_counter = 0
-                
+
         except Exception as e:
             logger.error(f"Loop error: {e}")
-        
+
         await asyncio.sleep(10)
 
 

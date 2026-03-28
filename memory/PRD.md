@@ -1,58 +1,62 @@
 # AI Trading Signal Screener - PRD
 
 ## Original Problem Statement
-Telegram бот для фильтрации и AI-анализа торговых сигналов из Tradium [WORKSPACE] Trade Setup Screener. Бот читает сигналы из приватной подгруппы (topic 3204), анализирует текст и графики с помощью GPT-5.2 vision, и отправляет результат анализа пользователю.
+Telegram бот для автоматического мониторинга торговых сигналов из Tradium [WORKSPACE] Trade Setup Screener. Бот парсит сигналы, AI распознаёт DCA #4 уровень с графика, мониторит цену, и отправляет красивое оповещение с графиком когда цена достигает DCA #4.
 
 ## Architecture
-- **signal_monitor.py** (Supervisor): Telethon → читает Tradium topic 3204 → парсит сетапы → скачивает графики → GPT-5.2 vision анализ → отправляет результат
-- **telegram_bot.py** (Supervisor): Бот @cryptosignal1mybot → ручной анализ (Tradium + legacy форматы) → команды /start /signals /entries /stats
-- **entry_monitor.py** (Supervisor): Мониторинг цен через Kraken/OKX → алерты при достижении Entry/TP/SL
-- **pro_analyzer.py**: Модуль глубокого AI анализа (технический + новости + сентимент + CoinGecko) — для legacy формата
-- **server.py**: FastAPI API для веб-дашборда
+- **signal_monitor.py** (Supervisor): Telethon → Tradium topic 3204 → парсит сетап → AI Vision извлекает DCA#4 с графика → сохраняет в базу МОЛЧА
+- **entry_monitor.py** (Supervisor): Мониторит цену каждые 10 сек → при достижении DCA#4 отправляет красивое оповещение + график → потом следит за TP/SL
+- **telegram_bot.py** (Supervisor): Только команды: /start /signals /entries /stats (ручной режим убран)
+- **server.py**: FastAPI API
+- Frontend: React (дашборд)
 
-## Signal Source
-- **Channel**: Tradium [WORKSPACE] (ID: -1002423680272)
-- **Topic**: Trade Setup Screener (topic_id: 3204)
-- **Format**: Structured text (#сетап) + TradingView chart images
-- **Fields**: Symbol, Direction (Long/Short), Entry, TP, SL, R:R, Trend indicators, MA, RSI, Volume, Key levels
+## Signal Flow
+1. Tradium → сигнал (текст + фото графика) → signal_monitor парсит
+2. GPT-5.2 Vision анализирует график → извлекает DCA #1-5, зону RESISTANCE/SUPPORT
+3. Сохраняет: symbol, direction, DCA#4 level, chart image → status: "watching"
+4. entry_monitor проверяет цену:
+   - SHORT: цена >= DCA#4 → "ВХОД В ШОРТ" + график
+   - LONG: цена <= DCA#4 → "ВХОД В ЛОНГ" + график
+5. После входа следит за TP/SL → оповещение при закрытии
+
+## DCA#4 Logic
+- **SHORT**: DCA уровни идут ВВЕРХ к RESISTANCE. DCA#4 возле сопротивления. SL за сопротивлением.
+- **LONG**: DCA уровни идут ВНИЗ к SUPPORT. DCA#4 возле поддержки. SL за поддержкой.
 
 ## What's Been Implemented
-### Core (Done)
-- ✅ Telethon подключение к Tradium [WORKSPACE] topic 3204
-- ✅ Парсер Tradium Setup Screener формата ($SYMBOL, Entry/TP/SL, TREND, MA/RSI, Volume, Key levels)
-- ✅ Скачивание графиков (photo pairing: photo ID+1 → text ID)
-- ✅ GPT-5.2 Vision анализ (текст + график через base64 ImageContent)
-- ✅ Отправка результатов AI анализа пользователям бота
-- ✅ Supervisor конфигурации для всех 3 скриптов (автоперезапуск)
-- ✅ Миграция с Binance → Kraken/CCXT (Error 451 fix)
-- ✅ Entry monitor (мониторинг цен, алерты TP/SL)
-- ✅ Telegram бот с кнопками (Сигналы, Вход, Статистика)
-- ✅ Веб-дашборд (React + Shadcn)
+- ✅ Telethon → Tradium [WORKSPACE] topic 3204
+- ✅ Парсер Tradium формата (Short/Long, Entry/TP/SL, R:R, Trend, MA/RSI)
+- ✅ GPT-5.2 Vision извлечение DCA#4 с графиков (base64 ImageContent)
+- ✅ Сохранение графиков в /app/backend/charts/
+- ✅ Entry monitor v3 — следит за DCA#4 с tolerance 0.3%
+- ✅ Красивые оповещения с DCA уровнями + график
+- ✅ TP/SL алерты с P&L расчётом
+- ✅ Telegram бот v3 (только команды, без ручного режима)
+- ✅ Supervisor для всех 3 скриптов
 
-### Integrations
-- ✅ GPT-5.2 with Vision (OpenAI via Emergent LLM Key) — текст + изображения
-- ✅ Telethon (Telegram User API) → Tradium [WORKSPACE]
+## Integrations
+- ✅ GPT-5.2 with Vision (Emergent LLM Key)
+- ✅ Telethon → Tradium [WORKSPACE]
 - ✅ Telegram Bot API → @cryptosignal1mybot
-- ✅ Kraken/OKX API (CCXT) — рыночные данные
-- ✅ CoinGecko API — фундаментальные данные
+- ✅ Kraken/OKX API (CCXT) — мониторинг цен
 
 ## Prioritized Backlog
 
-### P1 (High)
+### P1
 - [ ] Webhook для автоматической торговли
 
-### P2 (Medium)
+### P2
 - [ ] MEXC/KuCoin для редких альткоинов
 - [ ] Historical performance tracking
 - [ ] WebSocket обновления на дашборде
 
-### P3 (Low)
-- [ ] Custom AI промпты
+### P3
 - [ ] Backtesting mode
 
 ## Technical Notes
-- Binance API заблокирован (Error 451) — используем Kraken/OKX
+- Binance API заблокирован (Error 451)
 - OpenAI FileContentWithMimeType НЕ работает — используем ImageContent(image_base64=...)
-- Photo pairing: в Tradium фото приходит с ID = text_msg_id + 1
+- Photo pairing: фото msg_id = text msg_id + 1
+- Charts saved to: /app/backend/charts/
 - Telegram 2FA: 1240Maxim
 - Bot Token: 8558977408:AAHDyFx9KR-_u-apKjPH6wgeYq_qln2YX3U
