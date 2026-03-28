@@ -227,6 +227,8 @@ async def check_dca4_entries():
 
     if signals:
         logger.info(f"👀 Watching {len(signals)} signals for DCA #4 entry")
+    else:
+        logger.debug("No watching signals")
 
     for signal in signals:
         try:

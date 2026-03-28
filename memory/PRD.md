@@ -4,59 +4,41 @@
 Telegram бот для автоматического мониторинга торговых сигналов из Tradium [WORKSPACE] Trade Setup Screener. Бот парсит сигналы, AI распознаёт DCA #4 уровень с графика, мониторит цену, и отправляет красивое оповещение с графиком когда цена достигает DCA #4.
 
 ## Architecture
-- **signal_monitor.py** (Supervisor): Telethon → Tradium topic 3204 → парсит сетап → AI Vision извлекает DCA#4 с графика → сохраняет в базу МОЛЧА
-- **entry_monitor.py** (Supervisor): Мониторит цену каждые 10 сек → при достижении DCA#4 отправляет красивое оповещение + график → потом следит за TP/SL
-- **telegram_bot.py** (Supervisor): Только команды: /start /signals /entries /stats (ручной режим убран)
-- **server.py**: FastAPI API
-- Frontend: React (дашборд)
+- **server.py** (FastAPI + Workers): API + запускает все 3 воркера как subprocess при старте
+  - signal_monitor.py → Telethon → Tradium topic 3204 → парсит → AI DCA#4 → сохраняет молча
+  - entry_monitor.py → мониторит цены → DCA#4 alert + TP/SL tracking
+  - telegram_bot.py → /start /signals /entries /stats
+- Frontend: React (тёмный терминальный дашборд)
 
 ## Signal Flow
-1. Tradium → сигнал (текст + фото графика) → signal_monitor парсит
-2. GPT-5.2 Vision анализирует график → извлекает DCA #1-5, зону RESISTANCE/SUPPORT
-3. Сохраняет: symbol, direction, DCA#4 level, chart image → status: "watching"
-4. entry_monitor проверяет цену:
-   - SHORT: цена >= DCA#4 → "ВХОД В ШОРТ" + график
-   - LONG: цена <= DCA#4 → "ВХОД В ЛОНГ" + график
-5. После входа следит за TP/SL → оповещение при закрытии
-
-## DCA#4 Logic
-- **SHORT**: DCA уровни идут ВВЕРХ к RESISTANCE. DCA#4 возле сопротивления. SL за сопротивлением.
-- **LONG**: DCA уровни идут ВНИЗ к SUPPORT. DCA#4 возле поддержки. SL за поддержкой.
+1. Tradium → сигнал (текст + фото) → signal_monitor парсит
+2. GPT-5.2 Vision → извлекает DCA #1-5 + зону с графика
+3. Сохраняет в MongoDB: status="watching", dca4_level, chart_path
+4. entry_monitor каждые 10с проверяет цену:
+   - SHORT: цена >= DCA#4 → alert "ВХОД В ШОРТ" + график
+   - LONG: цена <= DCA#4 → alert "ВХОД В ЛОНГ" + график
+5. Потом мониторит TP/SL → alert при закрытии
 
 ## What's Been Implemented
 - ✅ Telethon → Tradium [WORKSPACE] topic 3204
-- ✅ Парсер Tradium формата (Short/Long, Entry/TP/SL, R:R, Trend, MA/RSI)
-- ✅ GPT-5.2 Vision извлечение DCA#4 с графиков (base64 ImageContent)
+- ✅ Парсер Tradium формата
+- ✅ GPT-5.2 Vision извлечение DCA#4 (ImageContent base64)
 - ✅ Сохранение графиков в /app/backend/charts/
-- ✅ Entry monitor v3 — следит за DCA#4 с tolerance 0.3%
-- ✅ Красивые оповещения с DCA уровнями + график
-- ✅ TP/SL алерты с P&L расчётом
-- ✅ Telegram бот v3 (только команды, без ручного режима)
-- ✅ Supervisor для всех 3 скриптов
+- ✅ Entry monitor v3 (DCA#4 + TP/SL + tolerance 0.3%)
+- ✅ Красивые Telegram оповещения + график снизу
+- ✅ Telegram бот v3 (только команды, ручной режим убран)
+- ✅ Воркеры запускаются из server.py (переживают деплой)
+- ✅ React админка (2 вкладки: Сигналы / Выполненные)
 
-## Integrations
-- ✅ GPT-5.2 with Vision (Emergent LLM Key)
-- ✅ Telethon → Tradium [WORKSPACE]
-- ✅ Telegram Bot API → @cryptosignal1mybot
-- ✅ Kraken/OKX API (CCXT) — мониторинг цен
+## Tested
+- ✅ Парсинг Tradium → DCA#4 extraction с реальных графиков
+- ✅ Entry monitor: ETH DCA#4=2024 → triggered @ 2024.53 → sendMessage/sendPhoto 200 OK
+- ✅ Воркеры стартуют из FastAPI и перезапускаются при падении
+- ✅ API endpoints: /signals, /entries, /entries/stats работают
 
 ## Prioritized Backlog
-
 ### P1
 - [ ] Webhook для автоматической торговли
-
 ### P2
 - [ ] MEXC/KuCoin для редких альткоинов
 - [ ] Historical performance tracking
-- [ ] WebSocket обновления на дашборде
-
-### P3
-- [ ] Backtesting mode
-
-## Technical Notes
-- Binance API заблокирован (Error 451)
-- OpenAI FileContentWithMimeType НЕ работает — используем ImageContent(image_base64=...)
-- Photo pairing: фото msg_id = text msg_id + 1
-- Charts saved to: /app/backend/charts/
-- Telegram 2FA: 1240Maxim
-- Bot Token: 8558977408:AAHDyFx9KR-_u-apKjPH6wgeYq_qln2YX3U

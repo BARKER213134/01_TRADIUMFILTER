@@ -614,6 +614,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Background workers management
+workers = {}
+
+async def start_worker(name: str, script: str):
+    """Start a background worker as subprocess with log files"""
+    python = "/root/.venv/bin/python3"
+    script_path = str(ROOT_DIR / script)
+    log_dir = Path("/var/log/supervisor")
+    
+    while True:
+        try:
+            logger.info(f"🚀 Starting worker: {name}")
+            
+            stdout_log = open(log_dir / f"{name}.out.log", "a")
+            stderr_log = open(log_dir / f"{name}.err.log", "a")
+            
+            proc = await asyncio.create_subprocess_exec(
+                python, script_path,
+                cwd=str(ROOT_DIR),
+                stdout=stdout_log,
+                stderr=stderr_log,
+                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(ROOT_DIR)}
+            )
+            workers[name] = proc
+            logger.info(f"✅ Worker {name} started (pid={proc.pid})")
+            
+            # Wait for exit
+            await proc.wait()
+            exit_code = proc.returncode
+            
+            stdout_log.close()
+            stderr_log.close()
+            
+            logger.warning(f"⚠️ Worker {name} exited (code={exit_code}), restarting in 5s...")
+        except Exception as e:
+            logger.error(f"❌ Worker {name} error: {e}")
+        
+        await asyncio.sleep(5)
+
+
+@app.on_event("startup")
+async def startup_workers():
+    """Start all background workers on FastAPI startup"""
+    logger.info("🔧 Starting background workers...")
+    asyncio.create_task(start_worker("signal_monitor", "signal_monitor.py"))
+    asyncio.create_task(start_worker("entry_monitor", "entry_monitor.py"))
+    asyncio.create_task(start_worker("telegram_bot", "telegram_bot.py"))
+    logger.info("✅ All workers scheduled")
+
+
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def shutdown_all():
+    """Shutdown all workers and DB"""
+    for name, proc in workers.items():
+        try:
+            proc.terminate()
+            logger.info(f"Terminated worker: {name}")
+        except:
+            pass
     client.close()
