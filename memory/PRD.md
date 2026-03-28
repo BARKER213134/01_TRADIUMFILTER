@@ -1,59 +1,58 @@
 # AI Trading Signal Screener - PRD
 
 ## Original Problem Statement
-Создать Telegram бота для фильтрации и AI-анализа торговых сигналов. Бот читает сигналы из закрытого бота @cvizor_bot (через Telethon user account), анализирует с помощью GPT-5.2 (технический анализ, новости, R:R, объёмы через Kraken/CoinGecko), и отправляет отфильтрованные сигналы пользователю.
+Telegram бот для фильтрации и AI-анализа торговых сигналов из Tradium [WORKSPACE] Trade Setup Screener. Бот читает сигналы из приватной подгруппы (topic 3204), анализирует текст и графики с помощью GPT-5.2 vision, и отправляет результат анализа пользователю.
 
 ## Architecture
-- **signal_monitor.py** (Supervisor): Telethon клиент → читает @cvizor_bot → анализирует через pro_analyzer → шлёт результат в Telegram
-- **telegram_bot.py** (Supervisor): Пользовательский бот @cryptosignal1mybot → команды /start /signals /entries /stats + ручной анализ
-- **entry_monitor.py** (Supervisor): Фоновый цикл → проверяет цены через Kraken/OKX → алертит при достижении точки входа / TP / SL
-- **pro_analyzer.py**: Модуль глубокого AI анализа (технический + новости + сентимент + CoinGecko)
+- **signal_monitor.py** (Supervisor): Telethon → читает Tradium topic 3204 → парсит сетапы → скачивает графики → GPT-5.2 vision анализ → отправляет результат
+- **telegram_bot.py** (Supervisor): Бот @cryptosignal1mybot → ручной анализ (Tradium + legacy форматы) → команды /start /signals /entries /stats
+- **entry_monitor.py** (Supervisor): Мониторинг цен через Kraken/OKX → алерты при достижении Entry/TP/SL
+- **pro_analyzer.py**: Модуль глубокого AI анализа (технический + новости + сентимент + CoinGecko) — для legacy формата
 - **server.py**: FastAPI API для веб-дашборда
-- Frontend: React + Shadcn UI дашборд
+
+## Signal Source
+- **Channel**: Tradium [WORKSPACE] (ID: -1002423680272)
+- **Topic**: Trade Setup Screener (topic_id: 3204)
+- **Format**: Structured text (#сетап) + TradingView chart images
+- **Fields**: Symbol, Direction (Long/Short), Entry, TP, SL, R:R, Trend indicators, MA, RSI, Volume, Key levels
 
 ## What's Been Implemented
-### Done (26 Jan - 26 Mar 2026)
-- ✅ FastAPI + React + MongoDB архитектура
-- ✅ GPT-5.2 интеграция через emergentintegrations (Emergent LLM Key)
-- ✅ Telethon автоматическое чтение @cvizor_bot (авторизация через 2FA)
-- ✅ Парсинг 5+ форматов сигналов (emoji, пробои, RSI)
-- ✅ pro_analyzer.py: глубокий AI анализ (технический + новости + сентимент)
-- ✅ entry_monitor.py: мониторинг цен + алерты TP/SL
-- ✅ Миграция с Binance (451 blocked) → Kraken + CoinGecko + OKX fallback
-- ✅ Telegram бот с кнопками: Сигналы, Вход, Статистика
-- ✅ Веб-дашборд со статистикой
+### Core (Done)
+- ✅ Telethon подключение к Tradium [WORKSPACE] topic 3204
+- ✅ Парсер Tradium Setup Screener формата ($SYMBOL, Entry/TP/SL, TREND, MA/RSI, Volume, Key levels)
+- ✅ Скачивание графиков (photo pairing: photo ID+1 → text ID)
+- ✅ GPT-5.2 Vision анализ (текст + график через base64 ImageContent)
+- ✅ Отправка результатов AI анализа пользователям бота
+- ✅ Supervisor конфигурации для всех 3 скриптов (автоперезапуск)
+- ✅ Миграция с Binance → Kraken/CCXT (Error 451 fix)
+- ✅ Entry monitor (мониторинг цен, алерты TP/SL)
+- ✅ Telegram бот с кнопками (Сигналы, Вход, Статистика)
+- ✅ Веб-дашборд (React + Shadcn)
 
-### Fixed (26 Mar 2026)
-- ✅ **Supervisor конфигурации** для telegram_bot, signal_monitor, entry_monitor — процессы автоматически перезапускаются
-- ✅ **Удалён Binance** из всех файлов (telegram_bot.py, signal_monitor.py, server.py) → заменён на ccxt/Kraken
-- ✅ **Telethon сессия** жива — бот подключен к @cvizor_bot и ожидает сигналы
-- ✅ Очистка ненужных файлов (telethon_auth.py, tg_step*.py)
-
-## Integrations
-- ✅ GPT-5.2 (OpenAI via Emergent LLM Key)
-- ✅ Telegram Bot API (token в .env)
-- ✅ Telethon (Telegram User API)
-- ✅ Kraken API (CCXT, публичный)
-- ✅ CoinGecko API (публичный)
-- ✅ OKX API (CCXT fallback, публичный)
+### Integrations
+- ✅ GPT-5.2 with Vision (OpenAI via Emergent LLM Key) — текст + изображения
+- ✅ Telethon (Telegram User API) → Tradium [WORKSPACE]
+- ✅ Telegram Bot API → @cryptosignal1mybot
+- ✅ Kraken/OKX API (CCXT) — рыночные данные
+- ✅ CoinGecko API — фундаментальные данные
 
 ## Prioritized Backlog
 
 ### P1 (High)
-- [ ] Webhook для автоматической торговли ("потом будем делать под вебхук")
+- [ ] Webhook для автоматической торговли
 
 ### P2 (Medium)
-- [ ] Добавить MEXC/KuCoin для редких альткоинов
-- [ ] Historical performance tracking (TP/SL результаты)
-- [ ] Multiple signal source chats
-- [ ] Real-time WebSocket обновления на дашборде
+- [ ] MEXC/KuCoin для редких альткоинов
+- [ ] Historical performance tracking
+- [ ] WebSocket обновления на дашборде
 
 ### P3 (Low)
-- [ ] Custom AI промпты по символу
+- [ ] Custom AI промпты
 - [ ] Backtesting mode
 
 ## Technical Notes
 - Binance API заблокирован (Error 451) — используем Kraken/OKX
-- Telegram 2FA пароль: 1240Maxim
+- OpenAI FileContentWithMimeType НЕ работает — используем ImageContent(image_base64=...)
+- Photo pairing: в Tradium фото приходит с ID = text_msg_id + 1
+- Telegram 2FA: 1240Maxim
 - Bot Token: 8558977408:AAHDyFx9KR-_u-apKjPH6wgeYq_qln2YX3U
-- Telethon сессия: /app/backend/telethon_session.session

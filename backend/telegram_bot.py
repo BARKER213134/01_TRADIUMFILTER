@@ -17,10 +17,11 @@ from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # AI
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
-# Import professional analyzer
+# Import analyzers
 from pro_analyzer import deep_analyze_signal, format_deep_analysis
+from signal_monitor import parse_tradium_signal, analyze_with_ai as tradium_analyze, format_analysis_message
 
 # MongoDB
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -413,41 +414,101 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming messages with signals"""
+    """Handle incoming messages with signals (text + photo)"""
     text = update.message.text or update.message.caption or ""
     
     if not text:
+        # Photo without caption - ask for signal text
+        if update.message.photo:
+            await update.message.reply_text(
+                "📸 Вижу график! Перешли вместе с текстом сигнала для анализа.",
+                parse_mode='HTML'
+            )
         return
     
-    # Parse signal
+    # Try Tradium format first, then legacy cvizor
+    tradium_signal = parse_tradium_signal(text)
+    
+    if tradium_signal:
+        # Tradium format detected
+        processing_msg = await update.message.reply_text(
+            f"🔄 <b>Анализ {tradium_signal['symbol']}...</b>\n\n"
+            f"📊 Индикаторы...\n"
+            f"📸 График...\n"
+            f"🤖 AI обрабатывает...",
+            parse_mode='HTML'
+        )
+        
+        try:
+            # Download photo if attached
+            chart_path = None
+            if update.message.photo:
+                photo = update.message.photo[-1]
+                file = await context.bot.get_file(photo.file_id)
+                import tempfile
+                chart_path = tempfile.mktemp(suffix='.jpg', dir='/tmp')
+                await file.download_to_drive(chart_path)
+            
+            analysis = await tradium_analyze(tradium_signal, chart_path)
+            
+            doc = {
+                "id": f"tg-{update.message.message_id}",
+                "original_text": text[:1000],
+                "symbol": tradium_signal['symbol'],
+                "direction": tradium_signal['direction'],
+                "entry_price": tradium_signal['entry_price'],
+                "take_profit": tradium_signal['take_profit'],
+                "stop_loss": tradium_signal['stop_loss'],
+                "rr_ratio": tradium_signal['rr_ratio'],
+                "timeframe": tradium_signal['timeframe'],
+                "status": "accepted" if analysis.get('decision') == 'ACCEPT' else "rejected",
+                "ai_analysis": analysis,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "telegram_manual",
+                "chat_id": update.message.chat_id
+            }
+            await db.signals.insert_one(doc)
+            
+            result_text = format_analysis_message(tradium_signal, analysis)
+            await processing_msg.edit_text(result_text, parse_mode='HTML')
+            
+            if chart_path:
+                import os
+                try:
+                    os.unlink(chart_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Tradium analysis error: {e}")
+            await processing_msg.edit_text(f"❌ Ошибка: {str(e)[:100]}", parse_mode='HTML')
+        return
+    
+    # Legacy cvizor format
     signal = parse_signal(text)
     
     if not signal:
         await update.message.reply_text(
             "⚠️ Не удалось распознать сигнал.\n\n"
-            "Убедитесь, что сообщение содержит:\n"
-            "• Направление (BUY/SELL/LONG/SHORT)\n"
-            "• Символ (BTCUSDT, ETHUSDT...)\n"
-            "• Цену входа, TP и SL",
+            "Поддерживаемые форматы:\n"
+            "• Tradium Setup Screener\n"
+            "• BUY/SELL SYMBOL @ price TP: SL:\n\n"
+            "Перешли сигнал из канала для анализа.",
             parse_mode='HTML'
         )
         return
     
-    # Send "analyzing" message
     processing_msg = await update.message.reply_text(
         f"🔄 <b>Глубокий анализ {signal['symbol']}...</b>\n\n"
         f"📊 Собираю технические данные...\n"
         f"📰 Ищу новости...\n"
-        f"🐦 Анализирую настроения...\n"
         f"🤖 AI обрабатывает...",
         parse_mode='HTML'
     )
     
     try:
-        # Deep professional analysis
         analysis = await deep_analyze_signal(signal)
         
-        # Save to database
         doc = {
             "id": f"tg-{update.message.message_id}",
             "original_text": text[:500],
@@ -465,16 +526,12 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         await db.signals.insert_one(doc)
         
-        # Format and send result
         result_text = format_deep_analysis(signal, analysis)
         await processing_msg.edit_text(result_text, parse_mode='HTML')
         
     except Exception as e:
         logger.error(f"Error analyzing signal: {e}")
-        await processing_msg.edit_text(
-            f"❌ Ошибка анализа: {str(e)[:100]}",
-            parse_mode='HTML'
-        )
+        await processing_msg.edit_text(f"❌ Ошибка анализа: {str(e)[:100]}", parse_mode='HTML')
 
 def main():
     """Start the bot"""
@@ -494,6 +551,7 @@ def main():
     application.add_handler(CommandHandler("entries", entries_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(MessageHandler(filters.Regex(r'^(📋 Сигналы|🎯 Вход|📈 Статистика)$'), handle_buttons))
+    application.add_handler(MessageHandler(filters.PHOTO, analyze_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_message))
     application.add_handler(MessageHandler(filters.FORWARDED, analyze_message))
     
