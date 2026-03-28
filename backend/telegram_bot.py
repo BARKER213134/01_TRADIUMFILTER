@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -32,10 +32,7 @@ db = mongo_client[db_name]
 
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
-main_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("📋 Сигналы"), KeyboardButton("🎯 Вход"), KeyboardButton("📈 Статистика")]],
-    resize_keyboard=True
-)
+main_keyboard = None
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,8 +53,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Оповещения когда цена достигает DCA #4.\n\n"
         f"👀 Слежу за: <b>{watching}</b> сигналов\n"
         f"📊 Открытых: <b>{open_entries}</b> позиций",
-        parse_mode='HTML',
-        reply_markup=main_keyboard
+        parse_mode='HTML'
     )
 
 
@@ -67,7 +63,7 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ).sort("timestamp", -1).limit(10).to_list(10)
 
     if not signals:
-        await update.message.reply_text("📋 Нет сигналов", reply_markup=main_keyboard)
+        await update.message.reply_text("📋 Нет сигналов", reply_markup=None)
         return
 
     text = "📋 <b>СИГНАЛЫ</b>\n\n"
@@ -91,7 +87,7 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"{icon} {dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
         text += f"    DCA#4: <code>{dca4}</code> | TP: <code>{s.get('take_profit', '?')}</code> | SL: <code>{s.get('stop_loss', '?')}</code>\n\n"
 
-    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=None)
 
 
 async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,7 +101,7 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🎯 <b>СИГНАЛЫ ВХОДА</b>\n\n"
         text += "Нет активных позиций\n\n"
         text += f"⏳ Ожидают DCA #4: <b>{watching}</b> сигналов\n"
-        await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=None)
         return
 
     text = "🎯 <b>АКТИВНЫЕ ПОЗИЦИИ</b>\n\n"
@@ -126,7 +122,7 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         win_rate = (tp_count / (tp_count + sl_count)) * 100
         text += f"\n📊 Win Rate: {win_rate:.0f}% ({tp_count}W / {sl_count}L)"
 
-    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=None)
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,18 +149,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     SL: {sl_hit} ❌
     Win Rate: {win_rate:.0f}%"""
 
-    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
-
-
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    if text == "📋 Сигналы":
-        await signals_command(update, context)
-    elif text == "🎯 Вход":
-        await entries_command(update, context)
-    elif text == "📈 Статистика":
-        await stats_command(update, context)
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=None)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +180,6 @@ def main():
     application.add_handler(CommandHandler("signals", signals_command))
     application.add_handler(CommandHandler("entries", entries_command))
     application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(MessageHandler(filters.Regex(r'^(📋 Сигналы|🎯 Вход|📈 Статистика)$'), handle_buttons))
 
     logger.info("Bot started! Waiting for messages...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
