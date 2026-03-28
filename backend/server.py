@@ -485,6 +485,35 @@ async def get_signal(signal_id: str):
         raise HTTPException(status_code=404, detail="Signal not found")
     return signal
 
+@api_router.get("/entries")
+async def get_entries(status: Optional[str] = None, limit: int = 50):
+    query = {}
+    if status:
+        query["status"] = status
+    entries = await db.entry_signals.find(
+        query, {"_id": 0}
+    ).sort("triggered_at", -1).limit(limit).to_list(limit)
+    return entries
+
+@api_router.get("/entries/stats")
+async def get_entries_stats():
+    open_count = await db.entry_signals.count_documents({"status": "OPEN"})
+    tp_count = await db.entry_signals.count_documents({"status": "TP_HIT"})
+    sl_count = await db.entry_signals.count_documents({"status": "SL_HIT"})
+    watching = await db.signals.count_documents({"status": "watching"})
+    total_signals = await db.signals.count_documents({})
+    entered = await db.signals.count_documents({"status": "entered"})
+    win_rate = (tp_count / (tp_count + sl_count) * 100) if (tp_count + sl_count) > 0 else 0
+    return {
+        "total_signals": total_signals,
+        "watching": watching,
+        "entered": entered,
+        "open": open_count,
+        "tp_hit": tp_count,
+        "sl_hit": sl_count,
+        "win_rate": round(win_rate, 1)
+    }
+
 # Bot control endpoints
 @api_router.get("/bot/status")
 async def get_bot_status():
