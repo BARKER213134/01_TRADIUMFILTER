@@ -349,6 +349,7 @@ async def main():
     logger.info("🎯 Entry Monitor v3 started — watching for DCA #4 levels")
 
     check_counter = 0
+    heartbeat = 0
 
     while True:
         try:
@@ -358,6 +359,12 @@ async def main():
             if check_counter >= 3:
                 await check_tp_sl()
                 check_counter = 0
+
+            heartbeat += 1
+            if heartbeat % 30 == 0:  # Every 5 min
+                watching = await db.signals.count_documents({"status": "watching", "dca4_level": {"$ne": None}})
+                open_pos = await db.entry_signals.count_documents({"status": "OPEN"})
+                logger.info(f"💓 Heartbeat: watching={watching}, open={open_pos}")
 
         except Exception as e:
             logger.error(f"Loop error: {e}")
