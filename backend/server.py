@@ -74,17 +74,30 @@ class SettingsUpdate(BaseModel):
     send_rejected: Optional[bool] = None
 
 class Signal(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    original_text: str
-    symbol: str
-    direction: str  # BUY or SELL
-    entry_price: float
-    take_profit: float
-    stop_loss: float
-    rr_ratio: float
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    status: str = "pending"  # pending, accepted, rejected, analyzing
+    original_text: Optional[str] = ""
+    symbol: str = ""
+    direction: str = ""
+    entry_price: float = 0
+    take_profit: float = 0
+    stop_loss: float = 0
+    rr_ratio: float = 0
+    timestamp: Optional[Any] = None
+    status: str = "watching"
+    dca4_level: Optional[float] = None
+    timeframe: Optional[str] = None
+    trend: Optional[str] = None
+    ma_status: Optional[str] = None
+    rsi_status: Optional[str] = None
+    volume_1d: Optional[float] = None
+    tp_pct: Optional[float] = None
+    sl_pct: Optional[float] = None
+    dca_data: Optional[Dict[str, Any]] = None
+    chart_path: Optional[str] = None
+    entry_triggered: Optional[bool] = False
+    trigger_price: Optional[float] = None
+    source: Optional[str] = None
     ai_analysis: Optional[Dict[str, Any]] = None
     market_data: Optional[Dict[str, Any]] = None
 
@@ -384,10 +397,6 @@ async def get_signals(
     signals = await db.signals.find(
         query, {"_id": 0}
     ).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
-    
-    for signal in signals:
-        if isinstance(signal.get('timestamp'), str):
-            signal['timestamp'] = datetime.fromisoformat(signal['timestamp'])
     
     return signals
 
