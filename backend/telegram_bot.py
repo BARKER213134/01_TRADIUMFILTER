@@ -78,6 +78,8 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = s.get('status', 'watching')
         if status == 'watching':
             icon = "👀"
+        elif status == 'dca4_reached':
+            icon = "📍"
         elif status == 'entered':
             icon = "🎯"
         elif status == 'tp_hit':

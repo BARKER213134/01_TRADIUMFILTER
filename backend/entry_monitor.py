@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Entry Monitor v3
-Monitors price and sends beautiful alerts when DCA #4 is reached
-Sends chart image with the notification
+Entry Monitor v4
+Two-stage confirmation:
+  Stage 1: Price reaches DCA #4 → status "dca4_reached" → notify "waiting for reversal"
+  Stage 2: Reversal candle detected → status "confirmed" → send CONFIRMED entry signal
 """
 
 import asyncio
@@ -15,6 +16,8 @@ from dotenv import load_dotenv
 from telegram import Bot
 from motor.motor_asyncio import AsyncIOMotorClient
 import ccxt
+
+from candle_patterns import detect_reversal_pattern
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -51,10 +54,9 @@ async def get_price(symbol: str) -> float:
                 price = float(ticker['last'])
                 price_cache[base] = (datetime.now(), price)
                 return price
-        except:
+        except Exception:
             continue
 
-    # Fallback OKX
     try:
         okx = ccxt.okx({'enableRateLimit': True})
         ticker = okx.fetch_ticker(f"{base}/USDT")
@@ -62,14 +64,50 @@ async def get_price(symbol: str) -> float:
             price = float(ticker['last'])
             price_cache[base] = (datetime.now(), price)
             return price
-    except:
+    except Exception:
         pass
 
     return 0
 
 
-def format_entry_alert(signal: dict, current_price: float) -> str:
-    """Format beautiful entry alert message"""
+def format_dca4_reached(signal: dict, current_price: float) -> str:
+    """Stage 1 alert: DCA #4 reached, waiting for reversal candle"""
+    direction = signal['direction']
+    symbol = signal['symbol'].replace('USDT', '')
+    timeframe = signal.get('timeframe', '4h')
+    dca4 = signal.get('dca4_level', 0)
+
+    if direction == 'SHORT':
+        dir_icon = "🔴"
+        dir_text = "ШОРТ"
+        zone = "сопротивления"
+        wait_text = "медвежью разворотную свечу"
+    else:
+        dir_icon = "🟢"
+        dir_text = "ЛОНГ"
+        zone = "поддержки"
+        wait_text = "бычью разворотную свечу"
+
+    return f"""{dir_icon} <b>DCA #4 ДОСТИГНУТ</b> {dir_icon}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+<b>${symbol}</b>  •  {timeframe}  •  {dir_text}
+
+📍 Цена: <code>{current_price}</code>
+🎯 DCA #4: <code>{dca4}</code>
+
+⏳ <b>Жду {wait_text}</b>
+на таймфрейме {timeframe} возле зоны {zone}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+Сигнал входа будет отправлен
+после подтверждения разворота"""
+
+
+def format_confirmed_entry(signal: dict, current_price: float, pattern: dict) -> str:
+    """Stage 2 alert: Reversal candle confirmed → ENTER"""
     direction = signal['direction']
     symbol = signal['symbol'].replace('USDT', '')
     timeframe = signal.get('timeframe', '4h')
@@ -87,12 +125,10 @@ def format_entry_alert(signal: dict, current_price: float) -> str:
         action = "BUY"
         zone_type = "поддержки"
 
-    # Zone info
     zone_low = dca_data.get('zone_low', '')
     zone_high = dca_data.get('zone_high', '')
     zone_text = f"{zone_low} — {zone_high}" if zone_low and zone_high else "N/A"
 
-    # DCA levels display
     dca_lines = ""
     for i in range(1, 6):
         lvl = dca_data.get(f'dca{i}', '')
@@ -100,25 +136,37 @@ def format_entry_alert(signal: dict, current_price: float) -> str:
             marker = " ◀ ВХОД" if i == 4 else ""
             dca_lines += f"    {'│' if i < 5 else '└'} DCA #{i}: <code>{lvl}</code>{marker}\n"
 
-    # Distance from entry to TP/SL
     tp = signal.get('take_profit', 0)
     sl = signal.get('stop_loss', 0)
     tp_pct = signal.get('tp_pct', 0)
     sl_pct = signal.get('sl_pct', 0)
     rr = signal.get('rr_ratio', 0)
 
-    # Trend indicators
     trend = signal.get('trend', '')
     ma = signal.get('ma_status', '')
     rsi = signal.get('rsi_status', '')
 
-    msg = f"""{dir_icon}{dir_icon}{dir_icon} <b>СИГНАЛ ВХОДА — {dir_text}</b> {dir_icon}{dir_icon}{dir_icon}
+    pattern_name = pattern.get('pattern', '?')
+    strength = pattern.get('strength', 0)
+    strength_bar = "🟢" * int(strength * 5)
+
+    candle = pattern.get('candle_data', {})
+    candle_text = ""
+    if candle:
+        candle_text = f"    O: <code>{candle.get('open', '')}</code>  H: <code>{candle.get('high', '')}</code>  L: <code>{candle.get('low', '')}</code>  C: <code>{candle.get('close', '')}</code>"
+
+    return f"""{dir_icon}{dir_icon}{dir_icon} <b>ПОДТВЕРЖДЁННЫЙ ВХОД — {dir_text}</b> {dir_icon}{dir_icon}{dir_icon}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
 <b>${symbol}</b>  •  {timeframe}  •  {action}
 
-📍 <b>Цена достигла DCA #4</b>
+🕯 <b>Разворотная свеча подтверждена!</b>
+    Паттерн: <b>{pattern_name}</b>
+    Сила: {strength_bar} ({strength:.0%})
+{candle_text}
+
+📍 <b>Точка входа</b>
     Текущая: <code>{current_price}</code>
     DCA #4:  <code>{dca4}</code>
 
@@ -141,8 +189,6 @@ def format_entry_alert(signal: dict, current_price: float) -> str:
 ━━━━━━━━━━━━━━━━━━━━━━
 
 ⚡️ <b>{action} {symbol}USDT @ {current_price}</b>"""
-
-    return msg.strip()
 
 
 def format_tp_sl_alert(signal: dict, current_price: float, result: str) -> str:
@@ -192,31 +238,20 @@ async def send_alert(text: str, chart_path: str = None):
     for user in users:
         try:
             if chart_path and os.path.exists(chart_path):
-                # Send text first, then chart
-                await bot.send_message(
-                    chat_id=user['chat_id'],
-                    text=text,
-                    parse_mode='HTML'
-                )
+                await bot.send_message(chat_id=user['chat_id'], text=text, parse_mode='HTML')
                 with open(chart_path, 'rb') as photo:
-                    await bot.send_photo(
-                        chat_id=user['chat_id'],
-                        photo=photo,
-                        caption=f"📊 График сетапа"
-                    )
+                    await bot.send_photo(chat_id=user['chat_id'], photo=photo, caption="📊 График сетапа")
             else:
-                await bot.send_message(
-                    chat_id=user['chat_id'],
-                    text=text,
-                    parse_mode='HTML'
-                )
+                await bot.send_message(chat_id=user['chat_id'], text=text, parse_mode='HTML')
         except Exception as e:
             logger.error(f"Send error to {user['chat_id']}: {e}")
 
 
+# ========== STAGE 1: Price reaches DCA #4 ==========
+
 async def check_dca4_entries():
-    """Check if price reached DCA #4 for any watching signals"""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+    """Check if price reached DCA #4 for watching signals → move to dca4_reached"""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
 
     signals = await db.signals.find({
         "status": "watching",
@@ -226,9 +261,7 @@ async def check_dca4_entries():
     }, {"_id": 0}).to_list(100)
 
     if signals:
-        logger.info(f"👀 Watching {len(signals)} signals for DCA #4 entry")
-    else:
-        logger.debug("No watching signals")
+        logger.info(f"👀 Stage 1: Watching {len(signals)} signals for DCA #4")
 
     for signal in signals:
         try:
@@ -244,7 +277,7 @@ async def check_dca4_entries():
                 continue
 
             triggered = False
-            tolerance = dca4 * 0.003  # 0.3% tolerance
+            tolerance = dca4 * 0.003
 
             if direction == 'SHORT' and price >= dca4 - tolerance:
                 triggered = True
@@ -252,44 +285,97 @@ async def check_dca4_entries():
                 triggered = True
 
             if triggered:
-                logger.info(f"🎯 DCA#4 HIT! {symbol} {direction} @ {price} (DCA#4={dca4})")
+                logger.info(f"📍 Stage 1: DCA#4 HIT! {symbol} {direction} @ {price} (DCA#4={dca4})")
 
-                # Format and send alert
-                alert_text = format_entry_alert(signal, price)
+                alert_text = format_dca4_reached(signal, price)
                 chart_path = signal.get('chart_path')
                 await send_alert(alert_text, chart_path)
 
-                # Update signal in DB
+                await db.signals.update_one(
+                    {"id": signal['id']},
+                    {"$set": {
+                        "status": "dca4_reached",
+                        "dca4_reached_price": price,
+                        "dca4_reached_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+
+        except Exception as e:
+            logger.error(f"Stage 1 error {signal.get('symbol', '?')}: {e}")
+
+        await asyncio.sleep(0.3)
+
+
+# ========== STAGE 2: Wait for reversal candle ==========
+
+async def check_reversal_candles():
+    """Check for reversal candle patterns on dca4_reached signals → confirm entry"""
+    signals = await db.signals.find({
+        "status": "dca4_reached",
+        "dca4_level": {"$ne": None}
+    }, {"_id": 0}).to_list(100)
+
+    if signals:
+        logger.info(f"🕯 Stage 2: Checking {len(signals)} signals for reversal candles")
+
+    for signal in signals:
+        try:
+            symbol = signal.get('symbol', '')
+            direction = signal.get('direction', '')
+            timeframe = signal.get('timeframe', '4h')
+
+            if not symbol or not direction:
+                continue
+
+            pattern = detect_reversal_pattern(symbol, timeframe, direction)
+
+            if pattern:
+                price = await get_price(symbol)
+                if price <= 0:
+                    continue
+
+                logger.info(f"🕯 Stage 2: CONFIRMED! {symbol} {direction} — {pattern['pattern']} (strength={pattern['strength']})")
+
+                alert_text = format_confirmed_entry(signal, price, pattern)
+                chart_path = signal.get('chart_path')
+                await send_alert(alert_text, chart_path)
+
                 await db.signals.update_one(
                     {"id": signal['id']},
                     {"$set": {
                         "status": "entered",
                         "entry_triggered": True,
                         "trigger_price": price,
-                        "trigger_time": datetime.now(timezone.utc).isoformat()
+                        "trigger_time": datetime.now(timezone.utc).isoformat(),
+                        "reversal_pattern": pattern['pattern'],
+                        "pattern_strength": pattern['strength'],
+                        "pattern_candle": pattern.get('candle_data', {})
                     }}
                 )
 
-                # Create entry record for TP/SL tracking
                 await db.entry_signals.insert_one({
                     "signal_id": signal['id'],
                     "symbol": symbol,
                     "direction": direction,
                     "entry_price": price,
-                    "dca4_level": dca4,
+                    "dca4_level": signal.get('dca4_level'),
                     "take_profit": signal.get('take_profit', 0),
                     "stop_loss": signal.get('stop_loss', 0),
                     "rr_ratio": signal.get('rr_ratio', 0),
                     "chart_path": signal.get('chart_path'),
+                    "reversal_pattern": pattern['pattern'],
+                    "pattern_strength": pattern['strength'],
                     "triggered_at": datetime.now(timezone.utc).isoformat(),
                     "status": "OPEN"
                 })
 
         except Exception as e:
-            logger.error(f"Check error {signal.get('symbol', '?')}: {e}")
+            logger.error(f"Stage 2 error {signal.get('symbol', '?')}: {e}")
 
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(1)
 
+
+# ========== TP/SL monitoring ==========
 
 async def check_tp_sl():
     """Check if open positions hit TP or SL"""
@@ -344,27 +430,40 @@ async def check_tp_sl():
             logger.error(f"TP/SL check error: {e}")
 
 
+# ========== Main Loop ==========
+
 async def main():
-    """Main monitoring loop"""
-    logger.info("🎯 Entry Monitor v3 started — watching for DCA #4 levels")
+    """Main monitoring loop with two stages"""
+    logger.info("🎯 Entry Monitor v4 — Two-stage confirmation (DCA#4 + Reversal Candle)")
 
     check_counter = 0
+    candle_counter = 0
     heartbeat = 0
 
     while True:
         try:
+            # Stage 1: Check DCA #4 every 10s
             await check_dca4_entries()
 
+            # Stage 2: Check reversal candles every 30s
+            candle_counter += 1
+            if candle_counter >= 3:
+                await check_reversal_candles()
+                candle_counter = 0
+
+            # TP/SL: Check every 30s
             check_counter += 1
             if check_counter >= 3:
                 await check_tp_sl()
                 check_counter = 0
 
+            # Heartbeat every 5 min
             heartbeat += 1
-            if heartbeat % 30 == 0:  # Every 5 min
+            if heartbeat % 30 == 0:
                 watching = await db.signals.count_documents({"status": "watching", "dca4_level": {"$ne": None}})
+                dca4_wait = await db.signals.count_documents({"status": "dca4_reached"})
                 open_pos = await db.entry_signals.count_documents({"status": "OPEN"})
-                logger.info(f"💓 Heartbeat: watching={watching}, open={open_pos}")
+                logger.info(f"💓 Heartbeat: watching={watching}, dca4_reached={dca4_wait}, open={open_pos}")
 
         except Exception as e:
             logger.error(f"Loop error: {e}")

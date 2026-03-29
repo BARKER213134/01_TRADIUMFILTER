@@ -56,6 +56,7 @@ function App() {
           <div className="stats-row">
             <StatPill label="Сигналы" value={stats?.total_signals || 0} />
             <StatPill label="Слежу" value={stats?.watching || 0} color="blue" />
+            <StatPill label="DCA#4" value={stats?.dca4_reached || 0} color="purple" />
             <StatPill label="Открыто" value={stats?.open || 0} color="yellow" />
             <StatPill label="TP" value={stats?.tp_hit || 0} color="green" />
             <StatPill label="SL" value={stats?.sl_hit || 0} color="red" />
@@ -104,7 +105,8 @@ const StatPill = ({ label, value, color = "default" }) => {
     blue: "pill-blue",
     green: "pill-green",
     red: "pill-red",
-    yellow: "pill-yellow"
+    yellow: "pill-yellow",
+    purple: "pill-purple"
   };
   return (
     <div className={`stat-pill ${cls[color]}`} data-testid={`stat-${label.toLowerCase()}`}>
@@ -140,12 +142,14 @@ const SignalModal = ({ signal, onClose }) => {
 
   const statusCls = {
     watching: "status-watching",
+    dca4_reached: "status-dca4",
     entered: "status-entered",
     tp_hit: "status-tp",
     sl_hit: "status-sl",
   };
   const statusText = {
     watching: "Слежу",
+    dca4_reached: "DCA#4",
     entered: "Вход",
     tp_hit: "TP",
     sl_hit: "SL",
@@ -218,6 +222,18 @@ const SignalModal = ({ signal, onClose }) => {
             <p className="modal-ai-text">{signal.ai_analysis.reasoning || JSON.stringify(signal.ai_analysis)}</p>
           </div>
         )}
+
+        {signal.reversal_pattern && (
+          <div className="modal-ai-section">
+            <h3 className="modal-section-title">Разворотная свеча</h3>
+            <div className="modal-grid" style={{borderBottom: 'none'}}>
+              <InfoBlock label="Паттерн" value={signal.reversal_pattern} accent />
+              <InfoBlock label="Сила" value={signal.pattern_strength ? `${(signal.pattern_strength * 100).toFixed(0)}%` : "—"} color="green" />
+              <InfoBlock label="Цена входа" value={fmt(signal.trigger_price)} />
+              <InfoBlock label="Время" value={signal.trigger_time ? new Date(signal.trigger_time).toLocaleString("ru-RU") : "—"} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -258,6 +274,7 @@ const SignalsTable = ({ signals, onSelect }) => {
             const isShort = s.direction === "SHORT" || s.direction === "SELL";
             const statusCls = {
               watching: "status-watching",
+              dca4_reached: "status-dca4",
               entered: "status-entered",
               tp_hit: "status-tp",
               sl_hit: "status-sl",
@@ -266,6 +283,7 @@ const SignalsTable = ({ signals, onSelect }) => {
             };
             const statusText = {
               watching: "Слежу",
+              dca4_reached: "DCA#4",
               entered: "Вход",
               tp_hit: "TP",
               sl_hit: "SL",

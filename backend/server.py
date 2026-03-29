@@ -511,12 +511,14 @@ async def get_entries_stats():
     tp_count = await db.entry_signals.count_documents({"status": "TP_HIT"})
     sl_count = await db.entry_signals.count_documents({"status": "SL_HIT"})
     watching = await db.signals.count_documents({"status": "watching"})
+    dca4_reached = await db.signals.count_documents({"status": "dca4_reached"})
     total_signals = await db.signals.count_documents({})
     entered = await db.signals.count_documents({"status": "entered"})
     win_rate = (tp_count / (tp_count + sl_count) * 100) if (tp_count + sl_count) > 0 else 0
     return {
         "total_signals": total_signals,
         "watching": watching,
+        "dca4_reached": dca4_reached,
         "entered": entered,
         "open": open_count,
         "tp_hit": tp_count,

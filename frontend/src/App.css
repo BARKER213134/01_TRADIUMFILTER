@@ -66,6 +66,7 @@ body {
 .pill-green .pill-value { color: var(--green); }
 .pill-red .pill-value { color: var(--red); }
 .pill-yellow .pill-value { color: var(--yellow); }
+.pill-purple .pill-value { color: #a855f7; }
 
 /* Tabs */
 .tabs {
@@ -143,6 +144,7 @@ tr:hover td { background: rgba(56, 189, 248, 0.03); }
   text-transform: uppercase;
 }
 .status-watching { background: rgba(59, 130, 246, 0.15); color: var(--blue); }
+.status-dca4 { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
 .status-entered { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
 .status-tp { background: rgba(34, 197, 94, 0.15); color: var(--green); }
 .status-sl { background: rgba(239, 68, 68, 0.15); color: var(--red); }
