@@ -36,7 +36,7 @@ BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📋 Tradium"), KeyboardButton("📍 DCA#4")],
-        [KeyboardButton("🕯 Вход+Разворот"), KeyboardButton("📊 Результаты")]
+        [KeyboardButton("⚡ Вход+Разворот"), KeyboardButton("📊 Результаты")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -226,7 +226,7 @@ def main():
     application.add_handler(CommandHandler("results", results_command))
     application.add_handler(MessageHandler(filters.Regex(r"📋 Tradium"), signals_command))
     application.add_handler(MessageHandler(filters.Regex(r"📍 DCA"), dca4_command))
-    application.add_handler(MessageHandler(filters.Regex(r"🕯 Вход"), confirmed_command))
+    application.add_handler(MessageHandler(filters.Regex(r"⚡ Вход"), confirmed_command))
     application.add_handler(MessageHandler(filters.Regex(r"📊 Результат"), results_command))
 
     logger.info("Bot started! Waiting for messages...")
