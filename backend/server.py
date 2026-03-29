@@ -532,12 +532,12 @@ async def delete_entries_batch(data: dict):
 
 @api_router.get("/health")
 async def health_check():
-    """Health check with worker status — use after deployment to verify everything works"""
-    worker_status = {}
-    for name, proc in workers.items():
-        worker_status[name] = {
-            "pid": proc.pid,
-            "running": proc.returncode is None
+    """Health check with worker status"""
+    ws = {}
+    for name, task in worker_tasks.items():
+        ws[name] = {
+            "running": not task.done(),
+            "status": worker_status.get(name, "unknown")
         }
 
     db_ok = False
@@ -550,11 +550,10 @@ async def health_check():
     session_exists = (ROOT_DIR / "telethon_session.session").exists()
 
     return {
-        "status": "ok",
-        "workers": worker_status,
+        "status": "ok" if all(not t.done() for t in worker_tasks.values()) else "degraded",
+        "workers": ws,
         "db_connected": db_ok,
         "telethon_session": session_exists,
-        "cwd": str(ROOT_DIR),
     }
 
 @api_router.get("/entries")
@@ -711,70 +710,112 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Background workers management
-workers = {}
+# Background workers management — run as asyncio tasks in-process
+worker_tasks = {}
+worker_status = {}
 
-async def start_worker(name: str, script: str):
-    """Start a background worker as subprocess with log files"""
-    python = "/root/.venv/bin/python3"
-    script_path = str(ROOT_DIR / script)
-    log_dir = Path("/var/log/supervisor")
-    log_dir.mkdir(parents=True, exist_ok=True)
 
-    if not Path(script_path).exists():
-        logger.error(f"❌ Worker script not found: {script_path}")
-        return
-
+async def run_signal_monitor():
+    """Run signal_monitor as in-process asyncio task"""
     while True:
         try:
-            logger.info(f"🚀 Starting worker: {name} ({script_path})")
-
-            stdout_log = open(log_dir / f"{name}.out.log", "a")
-            stderr_log = open(log_dir / f"{name}.err.log", "a")
-
-            proc = await asyncio.create_subprocess_exec(
-                python, script_path,
-                cwd=str(ROOT_DIR),
-                stdout=stdout_log,
-                stderr=stderr_log,
-                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": str(ROOT_DIR)}
-            )
-            workers[name] = proc
-            logger.info(f"✅ Worker {name} started (pid={proc.pid})")
-
-            await proc.wait()
-            exit_code = proc.returncode
-
-            stdout_log.close()
-            stderr_log.close()
-
-            logger.warning(f"⚠️ Worker {name} exited (code={exit_code}), restarting in 5s...")
+            logger.info("🚀 Starting signal_monitor in-process...")
+            worker_status["signal_monitor"] = "starting"
+            from signal_monitor import main as sm_main
+            worker_status["signal_monitor"] = "running"
+            await sm_main()
         except Exception as e:
-            logger.error(f"❌ Worker {name} error: {e}", exc_info=True)
+            logger.error(f"❌ signal_monitor crashed: {e}", exc_info=True)
+            worker_status["signal_monitor"] = f"crashed: {e}"
+        logger.warning("⚠️ signal_monitor exited, restarting in 5s...")
+        await asyncio.sleep(5)
 
+
+async def run_entry_monitor():
+    """Run entry_monitor as in-process asyncio task"""
+    while True:
+        try:
+            logger.info("🚀 Starting entry_monitor in-process...")
+            worker_status["entry_monitor"] = "starting"
+            from entry_monitor import main as em_main
+            worker_status["entry_monitor"] = "running"
+            await em_main()
+        except Exception as e:
+            logger.error(f"❌ entry_monitor crashed: {e}", exc_info=True)
+            worker_status["entry_monitor"] = f"crashed: {e}"
+        logger.warning("⚠️ entry_monitor exited, restarting in 5s...")
+        await asyncio.sleep(5)
+
+
+async def run_telegram_bot():
+    """Run telegram_bot as in-process asyncio task using start() instead of run_polling()"""
+    while True:
+        try:
+            logger.info("🚀 Starting telegram_bot in-process...")
+            worker_status["telegram_bot"] = "starting"
+
+            from telegram import Update
+            from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+            from telegram_bot import (
+                start_command, help_command, signals_command, dca4_command,
+                confirmed_command, results_command, BOT_TOKEN
+            )
+
+            if not BOT_TOKEN:
+                logger.error("❌ TELEGRAM_BOT_TOKEN not set!")
+                worker_status["telegram_bot"] = "no token"
+                await asyncio.sleep(30)
+                continue
+
+            application = Application.builder().token(BOT_TOKEN).build()
+
+            application.add_handler(CommandHandler("start", start_command))
+            application.add_handler(CommandHandler("help", help_command))
+            application.add_handler(CommandHandler("signals", signals_command))
+            application.add_handler(CommandHandler("dca4", dca4_command))
+            application.add_handler(CommandHandler("confirmed", confirmed_command))
+            application.add_handler(CommandHandler("results", results_command))
+            application.add_handler(MessageHandler(filters.Regex(r"📋 Tradium"), signals_command))
+            application.add_handler(MessageHandler(filters.Regex(r"📍 DCA"), dca4_command))
+            application.add_handler(MessageHandler(filters.Regex(r"⚡ Вход"), confirmed_command))
+            application.add_handler(MessageHandler(filters.Regex(r"📊 Результат"), results_command))
+
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+            worker_status["telegram_bot"] = "running"
+            logger.info("✅ Telegram bot polling started")
+
+            # Keep alive
+            while True:
+                await asyncio.sleep(60)
+
+        except Exception as e:
+            logger.error(f"❌ telegram_bot crashed: {e}", exc_info=True)
+            worker_status["telegram_bot"] = f"crashed: {e}"
+
+        logger.warning("⚠️ telegram_bot exited, restarting in 5s...")
         await asyncio.sleep(5)
 
 
 @app.on_event("startup")
 async def startup_workers():
-    """Start all background workers on FastAPI startup"""
-    logger.info(f"🔧 Starting background workers from {ROOT_DIR}...")
-    logger.info(f"   Python: /root/.venv/bin/python3")
-    logger.info(f"   ENV keys: {list(k for k in os.environ.keys() if k.startswith(('TELEGRAM', 'MONGO', 'EMERGENT', 'TRADIUM')))}")
+    """Start all background workers as asyncio tasks"""
+    logger.info(f"🔧 Starting background workers in-process from {ROOT_DIR}...")
 
-    asyncio.create_task(start_worker("signal_monitor", "signal_monitor.py"))
-    asyncio.create_task(start_worker("entry_monitor", "entry_monitor.py"))
-    asyncio.create_task(start_worker("telegram_bot", "telegram_bot.py"))
-    logger.info("✅ All workers scheduled")
+    worker_tasks["signal_monitor"] = asyncio.create_task(run_signal_monitor())
+    worker_tasks["entry_monitor"] = asyncio.create_task(run_entry_monitor())
+    worker_tasks["telegram_bot"] = asyncio.create_task(run_telegram_bot())
+
+    logger.info("✅ All workers started as asyncio tasks")
 
 
 @app.on_event("shutdown")
 async def shutdown_all():
     """Shutdown all workers and DB"""
-    for name, proc in workers.items():
-        try:
-            proc.terminate()
-            logger.info(f"Terminated worker: {name}")
-        except Exception:
-            pass
+    for name, task in worker_tasks.items():
+        task.cancel()
+        logger.info(f"Cancelled worker: {name}")
     client.close()
