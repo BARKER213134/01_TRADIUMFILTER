@@ -71,39 +71,73 @@ async def get_price(symbol: str) -> float:
 
 
 def format_dca4_reached(signal: dict, current_price: float) -> str:
-    """Stage 1 alert: DCA #4 reached, waiting for reversal candle"""
+    """Stage 1 alert: DCA #4 reached — full entry signal"""
     direction = signal['direction']
     symbol = signal['symbol'].replace('USDT', '')
     timeframe = signal.get('timeframe', '4h')
     dca4 = signal.get('dca4_level', 0)
+    dca_data = signal.get('dca_data', {})
 
     if direction == 'SHORT':
         dir_icon = "🔴"
         dir_text = "ШОРТ"
-        zone = "сопротивления"
-        wait_text = "медвежью разворотную свечу"
+        action = "SELL"
+        zone_type = "сопротивления"
     else:
         dir_icon = "🟢"
         dir_text = "ЛОНГ"
-        zone = "поддержки"
-        wait_text = "бычью разворотную свечу"
+        action = "BUY"
+        zone_type = "поддержки"
 
-    return f"""{dir_icon} <b>DCA #4 ДОСТИГНУТ</b> {dir_icon}
+    tp = signal.get('take_profit', 0)
+    sl = signal.get('stop_loss', 0)
+    tp_pct = signal.get('tp_pct', 0)
+    sl_pct = signal.get('sl_pct', 0)
+    rr = signal.get('rr_ratio', 0)
+
+    trend = signal.get('trend', '')
+    ma = signal.get('ma_status', '')
+    rsi = signal.get('rsi_status', '')
+
+    zone_low = dca_data.get('zone_low', '')
+    zone_high = dca_data.get('zone_high', '')
+    zone_text = f"{zone_low} — {zone_high}" if zone_low and zone_high else "N/A"
+
+    dca_lines = ""
+    for i in range(1, 6):
+        lvl = dca_data.get(f'dca{i}', '')
+        if lvl:
+            marker = " ◀ ВХОД" if i == 4 else ""
+            dca_lines += f"    {'│' if i < 5 else '└'} DCA #{i}: <code>{lvl}</code>{marker}\n"
+
+    return f"""{dir_icon}{dir_icon}{dir_icon} <b>СИГНАЛ ВХОДА — DCA #4 {dir_text}</b> {dir_icon}{dir_icon}{dir_icon}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<b>${symbol}</b>  •  {timeframe}  •  {dir_text}
+<b>${symbol}</b>  •  {timeframe}  •  {action}
 
-📍 Цена: <code>{current_price}</code>
-🎯 DCA #4: <code>{dca4}</code>
+📍 <b>Точка входа</b>
+    Цена: <code>{current_price}</code>
+    DCA #4: <code>{dca4}</code>
 
-⏳ <b>Жду {wait_text}</b>
-на таймфрейме {timeframe} возле зоны {zone}
+🎯 <b>Параметры сделки:</b>
+    TP: <code>{tp}</code>  (+{tp_pct}%)
+    SL: <code>{sl}</code>  (-{sl_pct}%)
+    R:R: <code>{rr}</code>
+
+📊 <b>Уровни DCA:</b>
+{dca_lines}
+📐 <b>Зона {zone_type}:</b>
+    {zone_text}
+
+📈 <b>Индикаторы:</b>
+    Тренд: {trend}
+    MA: {ma}  •  RSI: {rsi}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-Сигнал входа будет отправлен
-после подтверждения разворота"""
+⚡ <b>{action} {symbol}USDT @ {current_price}</b>
+⏳ Жду разворотную свечу для подтверждения"""
 
 
 def format_confirmed_entry(signal: dict, current_price: float, pattern: dict) -> str:
@@ -300,6 +334,22 @@ async def check_dca4_entries():
                     }}
                 )
 
+                await db.entry_signals.insert_one({
+                    "signal_id": signal['id'] + "_dca4",
+                    "signal_ref": signal['id'],
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_type": "DCA#4",
+                    "entry_price": price,
+                    "dca4_level": dca4,
+                    "take_profit": signal.get('take_profit', 0),
+                    "stop_loss": signal.get('stop_loss', 0),
+                    "rr_ratio": signal.get('rr_ratio', 0),
+                    "chart_path": signal.get('chart_path'),
+                    "triggered_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "OPEN"
+                })
+
         except Exception as e:
             logger.error(f"Stage 1 error {signal.get('symbol', '?')}: {e}")
 
@@ -354,9 +404,11 @@ async def check_reversal_candles():
                 )
 
                 await db.entry_signals.insert_one({
-                    "signal_id": signal['id'],
+                    "signal_id": signal['id'] + "_reversal",
+                    "signal_ref": signal['id'],
                     "symbol": symbol,
                     "direction": direction,
+                    "entry_type": "Разворот",
                     "entry_price": price,
                     "dca4_level": signal.get('dca4_level'),
                     "take_profit": signal.get('take_profit', 0),

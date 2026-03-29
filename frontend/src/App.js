@@ -486,13 +486,13 @@ const EntriesTable = ({ entries, onSelect }) => {
           <tr>
             <th>Время входа</th>
             <th>Пара</th>
+            <th>Тип</th>
             <th>Направление</th>
             <th>Цена входа</th>
             <th>DCA #4</th>
             <th>TP</th>
             <th>SL</th>
             <th>R:R</th>
-            <th>Закрытие</th>
             <th>P&L</th>
             <th>Статус</th>
           </tr>
@@ -525,6 +525,9 @@ const EntriesTable = ({ entries, onSelect }) => {
               SL_HIT: "SL"
             };
 
+            const entryType = e.entry_type || "—";
+            const typeCls = entryType === "DCA#4" ? "status-dca4" : entryType === "Разворот" ? "status-entered" : "";
+
             return (
               <tr 
                 key={e.signal_id || i} 
@@ -534,6 +537,7 @@ const EntriesTable = ({ entries, onSelect }) => {
               >
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{e.symbol?.replace("USDT", "")}</td>
+                <td><span className={`status ${typeCls}`}>{entryType}</span></td>
                 <td>
                   <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
                     {isShort ? "SHORT" : "LONG"}
@@ -544,7 +548,6 @@ const EntriesTable = ({ entries, onSelect }) => {
                 <td className="mono green">{fmt(e.take_profit)}</td>
                 <td className="mono red">{fmt(e.stop_loss)}</td>
                 <td className="mono bold">{e.rr_ratio || "—"}</td>
-                <td className="mono">{e.close_price ? fmt(e.close_price) : "—"}</td>
                 <td className={`mono bold ${pnlCls}`}>{pnl || "—"}</td>
                 <td>
                   <span className={`status ${statusCls[e.status] || ""}`}>
