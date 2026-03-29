@@ -79,7 +79,7 @@ def detect_hammer(candles: pd.DataFrame) -> Optional[dict]:
     lower = _lower_shadow(c)
     upper = _upper_shadow(c)
 
-    if lower >= body * 2 and upper <= body * 0.5 and body / r < 0.35:
+    if lower >= body * 2 and upper <= r * 0.15 and body / r < 0.4:
         return {"pattern": "Молот (Hammer)", "type": "bullish", "strength": 0.75}
     return None
 
@@ -95,7 +95,7 @@ def detect_inverted_hammer(candles: pd.DataFrame) -> Optional[dict]:
     upper = _upper_shadow(c)
     lower = _lower_shadow(c)
 
-    if upper >= body * 2 and lower <= body * 0.5 and body / r < 0.35:
+    if upper >= body * 2 and lower <= r * 0.15 and body / r < 0.4:
         return {"pattern": "Падающая звезда (Shooting Star)", "type": "bearish", "strength": 0.75}
     return None
 
