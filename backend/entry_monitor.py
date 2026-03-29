@@ -285,13 +285,10 @@ async def send_alert(text: str, chart_path: str = None):
 
 async def check_dca4_entries():
     """Check if price reached DCA #4 for watching signals → move to dca4_reached"""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
-
     signals = await db.signals.find({
         "status": "watching",
         "entry_triggered": False,
         "dca4_level": {"$ne": None},
-        "timestamp": {"$gte": cutoff.isoformat()}
     }, {"_id": 0}).to_list(100)
 
     if signals:
