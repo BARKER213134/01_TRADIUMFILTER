@@ -479,6 +479,40 @@ async def check_tp_sl():
             logger.error(f"TP/SL check error: {e}")
 
 
+async def send_health_report():
+    """Send short health report to Telegram every 2 hours"""
+    if not bot:
+        return
+
+    try:
+        watching = await db.signals.count_documents({"status": "watching", "dca4_level": {"$ne": None}})
+        dca4_wait = await db.signals.count_documents({"status": "dca4_reached"})
+        open_pos = await db.entry_signals.count_documents({"status": "OPEN"})
+        tp = await db.entry_signals.count_documents({"status": "TP_HIT"})
+        sl = await db.entry_signals.count_documents({"status": "SL_HIT"})
+
+        # Test price fetch
+        price_ok = False
+        try:
+            test_price = await get_price("BTCUSDT")
+            price_ok = test_price > 0
+        except Exception:
+            pass
+
+        now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+
+        text = f"""💚 <b>Бот работает</b> • {now}
+
+👀 {watching} слежу | 📍 {dca4_wait} DCA#4 | 📊 {open_pos} открыто
+✅ {tp} TP | ❌ {sl} SL | {"📈" if price_ok else "⚠️"} Цены: {"OK" if price_ok else "ОШИБКА"}"""
+
+        await send_alert(text)
+        logger.info(f"💚 Health report sent: watching={watching}, dca4={dca4_wait}, prices={'OK' if price_ok else 'FAIL'}")
+
+    except Exception as e:
+        logger.error(f"Health report error: {e}")
+
+
 # ========== Main Loop ==========
 
 async def main():
@@ -488,6 +522,8 @@ async def main():
     check_counter = 0
     candle_counter = 0
     heartbeat = 0
+    health_counter = 0
+    HEALTH_INTERVAL = 720  # 720 * 10s = 7200s = 2 hours
 
     while True:
         try:
@@ -506,13 +542,19 @@ async def main():
                 await check_tp_sl()
                 check_counter = 0
 
-            # Heartbeat every 5 min
+            # Heartbeat log every 5 min
             heartbeat += 1
             if heartbeat % 30 == 0:
                 watching = await db.signals.count_documents({"status": "watching", "dca4_level": {"$ne": None}})
                 dca4_wait = await db.signals.count_documents({"status": "dca4_reached"})
                 open_pos = await db.entry_signals.count_documents({"status": "OPEN"})
                 logger.info(f"💓 Heartbeat: watching={watching}, dca4_reached={dca4_wait}, open={open_pos}")
+
+            # Health report to Telegram every 2 hours
+            health_counter += 1
+            if health_counter >= HEALTH_INTERVAL:
+                await send_health_report()
+                health_counter = 0
 
         except Exception as e:
             logger.error(f"Loop error: {e}")
