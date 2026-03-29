@@ -46,6 +46,9 @@ function App() {
     );
   }
 
+  const confirmedSignals = signals.filter(s => s.status === "entered");
+  const tradiumSignals = signals.filter(s => s.status !== "entered");
+
   return (
     <div className="app">
       <Toaster position="top-right" richColors />
@@ -72,7 +75,15 @@ function App() {
           onClick={() => setTab("signals")}
         >
           Сигналы Tradium
-          <span className="tab-count">{signals.length}</span>
+          <span className="tab-count">{tradiumSignals.length}</span>
+        </button>
+        <button 
+          data-testid="tab-confirmed"
+          className={`tab ${tab === "confirmed" ? "active" : ""}`} 
+          onClick={() => setTab("confirmed")}
+        >
+          Подтверждённые
+          <span className="tab-count">{confirmedSignals.length}</span>
         </button>
         <button 
           data-testid="tab-entries"
@@ -86,7 +97,9 @@ function App() {
 
       <main className="content">
         {tab === "signals" ? (
-          <SignalsTable signals={signals} onSelect={setSelectedSignal} />
+          <SignalsTable signals={tradiumSignals} onSelect={setSelectedSignal} />
+        ) : tab === "confirmed" ? (
+          <ConfirmedTable signals={confirmedSignals} onSelect={setSelectedSignal} />
         ) : (
           <EntriesTable entries={entries} />
         )}
@@ -320,6 +333,68 @@ const SignalsTable = ({ signals, onSelect }) => {
                     {statusText[s.status] || s.status}
                   </span>
                 </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const ConfirmedTable = ({ signals, onSelect }) => {
+  if (!signals.length) {
+    return <div className="empty" data-testid="confirmed-empty">Нет подтверждённых сигналов</div>;
+  }
+
+  return (
+    <div className="table-wrap" data-testid="confirmed-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Время входа</th>
+            <th>Пара</th>
+            <th>TF</th>
+            <th>Направление</th>
+            <th>Паттерн</th>
+            <th>Сила</th>
+            <th>DCA #4</th>
+            <th>Цена входа</th>
+            <th>TP</th>
+            <th>SL</th>
+            <th>R:R</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signals.map((s, i) => {
+            const isShort = s.direction === "SHORT" || s.direction === "SELL";
+            const time = s.trigger_time ? new Date(s.trigger_time).toLocaleString("ru-RU", {
+              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+            }) : "—";
+            const strength = s.pattern_strength ? `${(s.pattern_strength * 100).toFixed(0)}%` : "—";
+
+            return (
+              <tr 
+                key={s.id || i} 
+                data-testid={`confirmed-row-${i}`}
+                className="clickable-row"
+                onClick={() => onSelect(s)}
+              >
+                <td className="mono dim">{time}</td>
+                <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
+                <td className="mono dim">{s.timeframe || "—"}</td>
+                <td>
+                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
+                    {isShort ? "SHORT" : "LONG"}
+                  </span>
+                </td>
+                <td className="mono">{s.reversal_pattern || "—"}</td>
+                <td className="mono green">{strength}</td>
+                <td className="mono accent">{s.dca4_level || "—"}</td>
+                <td className="mono">{fmt(s.trigger_price)}</td>
+                <td className="mono green">{fmt(s.take_profit)}</td>
+                <td className="mono red">{fmt(s.stop_loss)}</td>
+                <td className="mono bold">{s.rr_ratio || "—"}</td>
               </tr>
             );
           })}

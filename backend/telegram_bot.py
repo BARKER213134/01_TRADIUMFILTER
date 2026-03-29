@@ -34,7 +34,7 @@ db = mongo_client[db_name]
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
 main_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("📋 Сигналы"), KeyboardButton("🎯 Выполненные")]],
+    [[KeyboardButton("📋 Сигналы"), KeyboardButton("🕯 Подтверждённые"), KeyboardButton("🎯 Выполненные")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -94,6 +94,35 @@ async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += f"{icon} {dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
         text += f"    DCA#4: <code>{dca4}</code> | TP: <code>{s.get('take_profit', '?')}</code> | SL: <code>{s.get('stop_loss', '?')}</code>\n\n"
+
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+
+
+async def confirmed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    signals = await db.signals.find(
+        {"status": "entered"}, {"_id": 0}
+    ).sort("trigger_time", -1).limit(10).to_list(10)
+
+    if not signals:
+        text = "🕯 <b>ПОДТВЕРЖДЁННЫЕ СИГНАЛЫ</b>\n\n"
+        text += "Нет подтверждённых сигналов\n"
+        text += "Сигнал появится когда разворотная свеча\nподтвердит вход после DCA #4\n"
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+        return
+
+    text = "🕯 <b>ПОДТВЕРЖДЁННЫЕ СИГНАЛЫ</b>\n\n"
+
+    for s in signals:
+        dir_icon = "🟢" if s.get('direction') == 'LONG' else "🔴"
+        pattern = s.get('reversal_pattern', '?')
+        strength = s.get('pattern_strength', 0)
+        strength_pct = f"{strength * 100:.0f}%" if strength else "?"
+
+        text += f"{dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
+        text += f"    🕯 Паттерн: <b>{pattern}</b> ({strength_pct})\n"
+        text += f"    📍 Вход: <code>{s.get('trigger_price', '?')}</code>\n"
+        text += f"    🎯 TP: <code>{s.get('take_profit', '?')}</code> | SL: <code>{s.get('stop_loss', '?')}</code>\n"
+        text += f"    R:R: <code>{s.get('rr_ratio', '?')}</code>\n\n"
 
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
 
@@ -160,6 +189,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if "Сигналы" in text:
         await signals_command(update, context)
+    elif "Подтверждённые" in text:
+        await confirmed_command(update, context)
     elif "Выполненные" in text:
         await entries_command(update, context)
 
@@ -176,8 +207,10 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("signals", signals_command))
+    application.add_handler(CommandHandler("confirmed", confirmed_command))
     application.add_handler(CommandHandler("entries", entries_command))
     application.add_handler(MessageHandler(filters.Regex(r"📋 Сигналы"), signals_command))
+    application.add_handler(MessageHandler(filters.Regex(r"🕯 Подтверждённые"), confirmed_command))
     application.add_handler(MessageHandler(filters.Regex(r"🎯 Выполненные"), entries_command))
 
     logger.info("Bot started! Waiting for messages...")
