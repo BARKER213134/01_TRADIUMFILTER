@@ -1,37 +1,49 @@
-# AI Trading Signal Screener - PRD
+# Tradium Signal Monitor — PRD
 
-## Original Problem Statement
-Telegram бот для автоматического мониторинга торговых сигналов из Tradium [WORKSPACE] Trade Setup Screener. Парсит сигналы, AI распознаёт DCA #4 с графика, мониторит цену, отправляет оповещение + график когда цена достигает DCA #4.
+## Оригинальная задача
+Автоматический скринер трейдинг-сигналов из Telegram-канала Tradium. AI анализирует графики через GPT-5.2 Vision, извлекает DCA #4 уровни. Мониторит цену в реальном времени и отправляет alert в Telegram когда цена достигает DCA #4.
 
-## Architecture
-- **server.py** (FastAPI): API + запускает 3 воркера как subprocess
-  - signal_monitor.py → Telethon → Tradium topic 3204 → парсит → AI DCA#4 → сохраняет молча
-  - entry_monitor.py → мониторит цены (Kraken/OKX) → DCA#4 alert + TP/SL tracking
-  - telegram_bot.py → /start /signals /entries /stats /help
-- Frontend: React (тёмный терминальный дашборд)
-- DB: **MongoDB Atlas** (cluster0.vs1rsll.mongodb.net)
+## Архитектура
+- **Backend**: FastAPI (server.py) + фоновые скрипты (signal_monitor.py, entry_monitor.py, telegram_bot.py)
+- **Frontend**: React (Dark trading theme, 2 вкладки)
+- **DB**: MongoDB Atlas
+- **Integrations**: GPT-5.2 Vision (Emergent LLM Key), Telethon, python-telegram-bot, CCXT (Kraken)
 
-## What's Implemented
-- ✅ Telethon → Tradium [WORKSPACE] topic 3204
-- ✅ Парсер Tradium формата (Short/Long)
-- ✅ GPT-5.2 Vision DCA#4 extraction (ImageContent base64)
-- ✅ Entry monitor (DCA#4 + TP/SL + 0.3% tolerance)
-- ✅ Telegram оповещения + график
-- ✅ Воркеры из server.py (переживают деплой)
-- ✅ MongoDB Atlas (данные персистентны)
-- ✅ React админка (Сигналы / Выполненные)
-- ✅ API: /signals, /entries, /entries/stats
+## Что реализовано
 
-## Tested (28 Mar 2026)
-- ✅ E2E на Atlas: watching → DCA#4 hit → Telegram alert + photo → DB updated
-- ✅ SHORT trigger, LONG trigger, НЕ-trigger — все верно
-- ✅ Парсер: 5 форматов
-- ✅ API все поля (dca4_level, timeframe, trend)
-- ✅ Фронтенд обе вкладки
+### Core
+- [x] Telethon клиент читает сигналы из Tradium [WORKSPACE] topic 3204
+- [x] AI Vision (GPT-5.2) извлекает DCA уровни с графиков
+- [x] Entry monitor отслеживает цену через CCXT (Kraken) и алертит при DCA #4
+- [x] Telegram бот отправляет алерты (без ручного управления)
+- [x] Background scripts запускаются через subprocess в FastAPI startup
+- [x] MongoDB Atlas для персистенции данных
 
-## Backlog
-### P1
-- [ ] Webhook для автоматической торговли
-### P2
-- [ ] MEXC/KuCoin для редких альткоинов
-- [ ] Historical performance tracking
+### Admin Panel (React)
+- [x] Dark trading theme
+- [x] 2 вкладки: "Сигналы Tradium" и "Выполненные"
+- [x] Stats pills в хедере (Сигналы, Слежу, Открыто, TP, SL, Win Rate)
+- [x] Кликабельные строки таблицы → модальное окно с деталями
+- [x] Модальное окно: график (chart image), DCA уровни, AI анализ, все параметры сигнала
+- [x] API endpoint для отдачи chart images
+
+### Telegram Bot
+- [x] 2 кнопки: "📋 Сигналы" и "🎯 Выполненные" (ReplyKeyboardMarkup)
+- [x] Команды: /start, /help, /signals, /entries
+- [x] Бот-аватар с "PROFIT +238%"
+
+## Backlog (Будущие задачи)
+- [ ] P1: AI распознавание точек входа прямо с картинок (без текста)
+- [ ] P2: Webhook для автоматического исполнения сделок
+
+## API Endpoints
+- `GET /api/signals` — список сигналов
+- `GET /api/entries` — выполненные сигналы
+- `GET /api/entries/stats` — статистика
+- `GET /api/charts/{filename}` — chart images
+- `GET /api/signals/{signal_id}/chart` — chart filename по signal ID
+
+## DB Schema
+- `signals`: {id, symbol, direction, dca4_level, timeframe, trend, entry_price, take_profit, stop_loss, rr_ratio, status, chart_path, dca_data, timestamp, ...}
+- `entry_signals`: {signal_id, symbol, direction, entry_price, tp_price, sl_price, status, triggered_at, ...}
+- `bot_users`: {chat_id, registered}

@@ -12,6 +12,7 @@ function App() {
   const [entries, setEntries] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedSignal, setSelectedSignal] = useState(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -84,11 +85,15 @@ function App() {
 
       <main className="content">
         {tab === "signals" ? (
-          <SignalsTable signals={signals} />
+          <SignalsTable signals={signals} onSelect={setSelectedSignal} />
         ) : (
           <EntriesTable entries={entries} />
         )}
       </main>
+
+      {selectedSignal && (
+        <SignalModal signal={selectedSignal} onClose={() => setSelectedSignal(null)} />
+      )}
     </div>
   );
 }
@@ -109,7 +114,123 @@ const StatPill = ({ label, value, color = "default" }) => {
   );
 };
 
-const SignalsTable = ({ signals }) => {
+const SignalModal = ({ signal, onClose }) => {
+  const [chartUrl, setChartUrl] = useState(null);
+  const [chartLoading, setChartLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchChart = async () => {
+      if (signal.chart_path) {
+        const filename = signal.chart_path.split("/").pop();
+        setChartUrl(`${API}/charts/${filename}`);
+      }
+      setChartLoading(false);
+    };
+    fetchChart();
+  }, [signal]);
+
+  useEffect(() => {
+    const handleEsc = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [onClose]);
+
+  const isShort = signal.direction === "SHORT" || signal.direction === "SELL";
+  const time = signal.timestamp ? new Date(signal.timestamp).toLocaleString("ru-RU") : "—";
+
+  const statusCls = {
+    watching: "status-watching",
+    entered: "status-entered",
+    tp_hit: "status-tp",
+    sl_hit: "status-sl",
+  };
+  const statusText = {
+    watching: "Слежу",
+    entered: "Вход",
+    tp_hit: "TP",
+    sl_hit: "SL",
+  };
+
+  return (
+    <div className="modal-overlay" data-testid="signal-modal-overlay" onClick={onClose}>
+      <div className="modal-content" data-testid="signal-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title-row">
+            <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
+              {isShort ? "SHORT" : "LONG"}
+            </span>
+            <h2 className="modal-symbol">{signal.symbol?.replace("USDT", "")}<span className="modal-pair">/USDT</span></h2>
+            <span className="modal-tf">{signal.timeframe || "—"}</span>
+            <span className={`status ${statusCls[signal.status] || ""}`}>
+              {statusText[signal.status] || signal.status}
+            </span>
+          </div>
+          <button className="modal-close" data-testid="modal-close-btn" onClick={onClose}>✕</button>
+        </div>
+
+        {chartLoading ? (
+          <div className="modal-chart-loading">Загрузка графика...</div>
+        ) : chartUrl ? (
+          <div className="modal-chart">
+            <img src={chartUrl} alt={`Chart ${signal.symbol}`} data-testid="signal-chart-img" />
+          </div>
+        ) : (
+          <div className="modal-no-chart">Нет графика для этого сигнала</div>
+        )}
+
+        <div className="modal-grid">
+          <InfoBlock label="DCA #4" value={signal.dca4_level} accent />
+          <InfoBlock label="Entry" value={fmt(signal.entry_price)} />
+          <InfoBlock label="Take Profit" value={fmt(signal.take_profit)} color="green" />
+          <InfoBlock label="Stop Loss" value={fmt(signal.stop_loss)} color="red" />
+          <InfoBlock label="R:R" value={signal.rr_ratio || "—"} />
+          <InfoBlock label="Тренд" value={signal.trend || "—"} />
+          <InfoBlock label="MA" value={signal.ma_status || "—"} />
+          <InfoBlock label="RSI" value={signal.rsi_status || "—"} />
+          <InfoBlock label="Volume 1D" value={signal.volume_1d ? `${signal.volume_1d}M` : "—"} />
+          <InfoBlock label="TP %" value={signal.tp_pct ? `${signal.tp_pct}%` : "—"} color="green" />
+          <InfoBlock label="SL %" value={signal.sl_pct ? `${signal.sl_pct}%` : "—"} color="red" />
+          <InfoBlock label="Время" value={time} />
+        </div>
+
+        {signal.dca_data && (
+          <div className="modal-dca-section">
+            <h3 className="modal-section-title">DCA Уровни</h3>
+            <div className="modal-dca-grid">
+              {[1,2,3,4,5].map(n => (
+                <div key={n} className={`dca-item ${n === 4 ? "dca-highlight" : ""}`}>
+                  <span className="dca-label">DCA #{n}</span>
+                  <span className="dca-value">{signal.dca_data[`dca${n}`] || "—"}</span>
+                </div>
+              ))}
+            </div>
+            {signal.dca_data.zone_type && (
+              <div className="modal-zone">
+                {signal.dca_data.zone_type}: {signal.dca_data.zone_low} — {signal.dca_data.zone_high}
+              </div>
+            )}
+          </div>
+        )}
+
+        {signal.ai_analysis && (
+          <div className="modal-ai-section">
+            <h3 className="modal-section-title">AI Анализ</h3>
+            <p className="modal-ai-text">{signal.ai_analysis.reasoning || JSON.stringify(signal.ai_analysis)}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const InfoBlock = ({ label, value, color, accent }) => (
+  <div className={`info-block ${accent ? "info-accent" : ""}`}>
+    <span className="info-label">{label}</span>
+    <span className={`info-value ${color || ""}`}>{value ?? "—"}</span>
+  </div>
+);
+
+const SignalsTable = ({ signals, onSelect }) => {
   if (!signals.length) {
     return <div className="empty" data-testid="signals-empty">Нет сигналов из Tradium</div>;
   }
@@ -156,7 +277,12 @@ const SignalsTable = ({ signals }) => {
             }) : "—";
 
             return (
-              <tr key={s.id || i} data-testid={`signal-row-${i}`}>
+              <tr 
+                key={s.id || i} 
+                data-testid={`signal-row-${i}`}
+                className="clickable-row"
+                onClick={() => onSelect(s)}
+              >
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
                 <td className="mono dim">{s.timeframe || "—"}</td>

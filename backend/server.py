@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -602,6 +603,29 @@ async def get_daily_chart_data(days: int = 7):
         })
     
     return data
+
+# Chart image serving endpoint
+@api_router.get("/charts/{filename}")
+async def serve_chart(filename: str):
+    """Serve chart image files"""
+    charts_dir = ROOT_DIR / "charts"
+    file_path = charts_dir / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Chart not found")
+    return FileResponse(str(file_path), media_type="image/jpeg")
+
+
+@api_router.get("/signals/{signal_id}/chart")
+async def get_signal_chart(signal_id: str):
+    """Get chart filename for a specific signal"""
+    signal = await db.signals.find_one({"id": signal_id}, {"_id": 0, "chart_path": 1})
+    if not signal or not signal.get("chart_path"):
+        raise HTTPException(status_code=404, detail="Chart not found for this signal")
+    chart_path = Path(signal["chart_path"])
+    if not chart_path.exists():
+        raise HTTPException(status_code=404, detail="Chart file missing")
+    return {"filename": chart_path.name}
+
 
 # Market data endpoint (for testing)
 @api_router.get("/market/{symbol}")
