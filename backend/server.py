@@ -529,6 +529,34 @@ async def delete_entries_batch(data: dict):
     result = await db.entry_signals.delete_many({"signal_id": {"$in": ids}})
     return {"status": "deleted", "count": result.deleted_count}
 
+
+@api_router.get("/health")
+async def health_check():
+    """Health check with worker status — use after deployment to verify everything works"""
+    worker_status = {}
+    for name, proc in workers.items():
+        worker_status[name] = {
+            "pid": proc.pid,
+            "running": proc.returncode is None
+        }
+
+    db_ok = False
+    try:
+        await db.signals.count_documents({})
+        db_ok = True
+    except Exception:
+        pass
+
+    session_exists = (ROOT_DIR / "telethon_session.session").exists()
+
+    return {
+        "status": "ok",
+        "workers": worker_status,
+        "db_connected": db_ok,
+        "telethon_session": session_exists,
+        "cwd": str(ROOT_DIR),
+    }
+
 @api_router.get("/entries")
 async def get_entries(status: Optional[str] = None, limit: int = 50):
     query = {}
@@ -691,14 +719,19 @@ async def start_worker(name: str, script: str):
     python = "/root/.venv/bin/python3"
     script_path = str(ROOT_DIR / script)
     log_dir = Path("/var/log/supervisor")
-    
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    if not Path(script_path).exists():
+        logger.error(f"❌ Worker script not found: {script_path}")
+        return
+
     while True:
         try:
-            logger.info(f"🚀 Starting worker: {name}")
-            
+            logger.info(f"🚀 Starting worker: {name} ({script_path})")
+
             stdout_log = open(log_dir / f"{name}.out.log", "a")
             stderr_log = open(log_dir / f"{name}.err.log", "a")
-            
+
             proc = await asyncio.create_subprocess_exec(
                 python, script_path,
                 cwd=str(ROOT_DIR),
@@ -708,25 +741,27 @@ async def start_worker(name: str, script: str):
             )
             workers[name] = proc
             logger.info(f"✅ Worker {name} started (pid={proc.pid})")
-            
-            # Wait for exit
+
             await proc.wait()
             exit_code = proc.returncode
-            
+
             stdout_log.close()
             stderr_log.close()
-            
+
             logger.warning(f"⚠️ Worker {name} exited (code={exit_code}), restarting in 5s...")
         except Exception as e:
-            logger.error(f"❌ Worker {name} error: {e}")
-        
+            logger.error(f"❌ Worker {name} error: {e}", exc_info=True)
+
         await asyncio.sleep(5)
 
 
 @app.on_event("startup")
 async def startup_workers():
     """Start all background workers on FastAPI startup"""
-    logger.info("🔧 Starting background workers...")
+    logger.info(f"🔧 Starting background workers from {ROOT_DIR}...")
+    logger.info(f"   Python: /root/.venv/bin/python3")
+    logger.info(f"   ENV keys: {list(k for k in os.environ.keys() if k.startswith(('TELEGRAM', 'MONGO', 'EMERGENT', 'TRADIUM')))}")
+
     asyncio.create_task(start_worker("signal_monitor", "signal_monitor.py"))
     asyncio.create_task(start_worker("entry_monitor", "entry_monitor.py"))
     asyncio.create_task(start_worker("telegram_bot", "telegram_bot.py"))
@@ -740,6 +775,6 @@ async def shutdown_all():
         try:
             proc.terminate()
             logger.info(f"Terminated worker: {name}")
-        except:
+        except Exception:
             pass
     client.close()

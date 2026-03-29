@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 API_ID = int(os.environ.get('TELEGRAM_API_ID', 0))
 API_HASH = os.environ.get('TELEGRAM_API_HASH', '')
 SESSION_FILE = ROOT_DIR / 'backfill_session'
-TRADIUM_CHANNEL_ID = -1002423680272
-TRADIUM_TOPIC_ID = 3204
+TRADIUM_CHANNEL_ID = int(os.environ.get('TRADIUM_CHANNEL_ID', '-1002423680272'))
+TRADIUM_TOPIC_ID = int(os.environ.get('TRADIUM_TOPIC_ID', '3204'))
 CHARTS_DIR = ROOT_DIR / 'charts'
 CHARTS_DIR.mkdir(exist_ok=True)
 
