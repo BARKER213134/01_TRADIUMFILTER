@@ -495,6 +495,40 @@ async def get_signal(signal_id: str):
         raise HTTPException(status_code=404, detail="Signal not found")
     return signal
 
+
+@api_router.delete("/signals/{signal_id}")
+async def delete_signal(signal_id: str):
+    result = await db.signals.delete_one({"id": signal_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    return {"status": "deleted", "id": signal_id}
+
+
+@api_router.post("/signals/delete-batch")
+async def delete_signals_batch(data: dict):
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    result = await db.signals.delete_many({"id": {"$in": ids}})
+    return {"status": "deleted", "count": result.deleted_count}
+
+
+@api_router.delete("/entries/{signal_id}")
+async def delete_entry(signal_id: str):
+    result = await db.entry_signals.delete_one({"signal_id": signal_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "deleted", "id": signal_id}
+
+
+@api_router.post("/entries/delete-batch")
+async def delete_entries_batch(data: dict):
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    result = await db.entry_signals.delete_many({"signal_id": {"$in": ids}})
+    return {"status": "deleted", "count": result.deleted_count}
+
 @api_router.get("/entries")
 async def get_entries(status: Optional[str] = None, limit: int = 50):
     query = {}

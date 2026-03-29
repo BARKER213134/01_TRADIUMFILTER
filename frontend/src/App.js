@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import "@/App.css";
 import axios from "axios";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -13,6 +13,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState(null);
+  const [selected, setSelected] = useState(new Set());
 
   const fetchData = useCallback(async () => {
     try {
@@ -37,6 +38,57 @@ function App() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // Clear selection when switching tabs
+  useEffect(() => { setSelected(new Set()); }, [tab]);
+
+  const currentItems = (() => {
+    if (tab === "tradium") return signals.filter(s => s.status === "watching");
+    if (tab === "dca4") return signals.filter(s => s.status === "dca4_reached");
+    if (tab === "confirmed") return signals.filter(s => s.status === "entered");
+    if (tab === "results") return entries;
+    return [];
+  })();
+
+  const getItemId = (item) => item.signal_id || item.id;
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === currentItems.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(currentItems.map(getItemId)));
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (selected.size === 0) return;
+    const ids = [...selected];
+
+    try {
+      if (tab === "results") {
+        await axios.post(`${API}/entries/delete-batch`, { ids });
+      } else {
+        await axios.post(`${API}/signals/delete-batch`, { ids });
+      }
+      toast.success(`Удалено: ${ids.length}`);
+      setSelected(new Set());
+      fetchData();
+    } catch (e) {
+      toast.error("Ошибка удаления");
+    }
+  };
+
+  const tradiumSignals = signals.filter(s => s.status === "watching");
+  const dca4Signals = signals.filter(s => s.status === "dca4_reached");
+  const confirmedSignals = signals.filter(s => s.status === "entered");
+
   if (loading) {
     return (
       <div className="loader">
@@ -46,14 +98,10 @@ function App() {
     );
   }
 
-  const tradiumSignals = signals.filter(s => s.status === "watching");
-  const dca4Signals = signals.filter(s => s.status === "dca4_reached");
-  const confirmedSignals = signals.filter(s => s.status === "entered");
-
   return (
     <div className="app">
       <Toaster position="top-right" richColors />
-      
+
       <header className="header">
         <div className="header-inner">
           <h1 className="logo">TRADIUM MONITOR</h1>
@@ -70,49 +118,47 @@ function App() {
       </header>
 
       <div className="tabs">
-        <button 
-          data-testid="tab-tradium"
-          className={`tab ${tab === "tradium" ? "active" : ""}`} 
-          onClick={() => setTab("tradium")}
-        >
-          Tradium
-          <span className="tab-count">{tradiumSignals.length}</span>
+        <button data-testid="tab-tradium" className={`tab ${tab === "tradium" ? "active" : ""}`} onClick={() => setTab("tradium")}>
+          Tradium<span className="tab-count">{tradiumSignals.length}</span>
         </button>
-        <button 
-          data-testid="tab-dca4"
-          className={`tab ${tab === "dca4" ? "active" : ""}`} 
-          onClick={() => setTab("dca4")}
-        >
-          DCA#4
-          <span className="tab-count">{dca4Signals.length}</span>
+        <button data-testid="tab-dca4" className={`tab ${tab === "dca4" ? "active" : ""}`} onClick={() => setTab("dca4")}>
+          DCA#4<span className="tab-count">{dca4Signals.length}</span>
         </button>
-        <button 
-          data-testid="tab-confirmed"
-          className={`tab ${tab === "confirmed" ? "active" : ""}`} 
-          onClick={() => setTab("confirmed")}
-        >
-          Вход + Разворот
-          <span className="tab-count">{confirmedSignals.length}</span>
+        <button data-testid="tab-confirmed" className={`tab ${tab === "confirmed" ? "active" : ""}`} onClick={() => setTab("confirmed")}>
+          Вход + Разворот<span className="tab-count">{confirmedSignals.length}</span>
         </button>
-        <button 
-          data-testid="tab-results"
-          className={`tab ${tab === "results" ? "active" : ""}`} 
-          onClick={() => setTab("results")}
-        >
-          Результаты
-          <span className="tab-count">{entries.length}</span>
+        <button data-testid="tab-results" className={`tab ${tab === "results" ? "active" : ""}`} onClick={() => setTab("results")}>
+          Результаты<span className="tab-count">{entries.length}</span>
         </button>
       </div>
 
+      {currentItems.length > 0 && (
+        <div className="bulk-actions" data-testid="bulk-actions">
+          <label className="select-all-label" data-testid="select-all">
+            <input
+              type="checkbox"
+              checked={selected.size === currentItems.length && currentItems.length > 0}
+              onChange={toggleAll}
+            />
+            <span>Выбрать все ({currentItems.length})</span>
+          </label>
+          {selected.size > 0 && (
+            <button className="delete-btn" data-testid="delete-selected-btn" onClick={deleteSelected}>
+              Удалить выбранные ({selected.size})
+            </button>
+          )}
+        </div>
+      )}
+
       <main className="content">
         {tab === "tradium" ? (
-          <SignalsTable signals={tradiumSignals} onSelect={setSelectedSignal} />
+          <SignalsTable signals={tradiumSignals} onSelect={setSelectedSignal} selected={selected} onToggle={toggleSelect} />
         ) : tab === "dca4" ? (
-          <DCA4Table signals={dca4Signals} onSelect={setSelectedSignal} />
+          <DCA4Table signals={dca4Signals} onSelect={setSelectedSignal} selected={selected} onToggle={toggleSelect} />
         ) : tab === "confirmed" ? (
-          <ConfirmedTable signals={confirmedSignals} onSelect={setSelectedSignal} />
+          <ConfirmedTable signals={confirmedSignals} onSelect={setSelectedSignal} selected={selected} onToggle={toggleSelect} />
         ) : (
-          <EntriesTable entries={entries} onSelect={setSelectedSignal} />
+          <EntriesTable entries={entries} onSelect={setSelectedSignal} selected={selected} onToggle={toggleSelect} />
         )}
       </main>
 
@@ -125,12 +171,8 @@ function App() {
 
 const StatPill = ({ label, value, color = "default" }) => {
   const cls = {
-    default: "pill-default",
-    blue: "pill-blue",
-    green: "pill-green",
-    red: "pill-red",
-    yellow: "pill-yellow",
-    purple: "pill-purple"
+    default: "pill-default", blue: "pill-blue", green: "pill-green",
+    red: "pill-red", yellow: "pill-yellow", purple: "pill-purple"
   };
   return (
     <div className={`stat-pill ${cls[color]}`} data-testid={`stat-${label.toLowerCase()}`}>
@@ -145,14 +187,11 @@ const SignalModal = ({ signal, onClose }) => {
   const [chartLoading, setChartLoading] = useState(true);
 
   useEffect(() => {
-    const fetchChart = async () => {
-      if (signal.chart_path) {
-        const filename = signal.chart_path.split("/").pop();
-        setChartUrl(`${API}/charts/${filename}`);
-      }
-      setChartLoading(false);
-    };
-    fetchChart();
+    if (signal.chart_path) {
+      const filename = signal.chart_path.split("/").pop();
+      setChartUrl(`${API}/charts/${filename}`);
+    }
+    setChartLoading(false);
   }, [signal]);
 
   useEffect(() => {
@@ -164,34 +203,18 @@ const SignalModal = ({ signal, onClose }) => {
   const isShort = signal.direction === "SHORT" || signal.direction === "SELL";
   const time = signal.timestamp ? new Date(signal.timestamp).toLocaleString("ru-RU") : "—";
 
-  const statusCls = {
-    watching: "status-watching",
-    dca4_reached: "status-dca4",
-    entered: "status-entered",
-    tp_hit: "status-tp",
-    sl_hit: "status-sl",
-  };
-  const statusText = {
-    watching: "Слежу",
-    dca4_reached: "DCA#4",
-    entered: "Вход",
-    tp_hit: "TP",
-    sl_hit: "SL",
-  };
+  const statusCls = { watching: "status-watching", dca4_reached: "status-dca4", entered: "status-entered", tp_hit: "status-tp", sl_hit: "status-sl" };
+  const statusText = { watching: "Слежу", dca4_reached: "DCA#4", entered: "Вход", tp_hit: "TP", sl_hit: "SL" };
 
   return (
     <div className="modal-overlay" data-testid="signal-modal-overlay" onClick={onClose}>
       <div className="modal-content" data-testid="signal-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title-row">
-            <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
-              {isShort ? "SHORT" : "LONG"}
-            </span>
+            <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>{isShort ? "SHORT" : "LONG"}</span>
             <h2 className="modal-symbol">{signal.symbol?.replace("USDT", "")}<span className="modal-pair">/USDT</span></h2>
             <span className="modal-tf">{signal.timeframe || "—"}</span>
-            <span className={`status ${statusCls[signal.status] || ""}`}>
-              {statusText[signal.status] || signal.status}
-            </span>
+            <span className={`status ${statusCls[signal.status] || ""}`}>{statusText[signal.status] || signal.status}</span>
           </div>
           <button className="modal-close" data-testid="modal-close-btn" onClick={onClose}>✕</button>
         </div>
@@ -199,11 +222,9 @@ const SignalModal = ({ signal, onClose }) => {
         {chartLoading ? (
           <div className="modal-chart-loading">Загрузка графика...</div>
         ) : chartUrl ? (
-          <div className="modal-chart">
-            <img src={chartUrl} alt={`Chart ${signal.symbol}`} data-testid="signal-chart-img" />
-          </div>
+          <div className="modal-chart"><img src={chartUrl} alt={`Chart ${signal.symbol}`} data-testid="signal-chart-img" /></div>
         ) : (
-          <div className="modal-no-chart">Нет графика для этого сигнала</div>
+          <div className="modal-no-chart">Нет графика</div>
         )}
 
         <div className="modal-grid">
@@ -232,18 +253,6 @@ const SignalModal = ({ signal, onClose }) => {
                 </div>
               ))}
             </div>
-            {signal.dca_data.zone_type && (
-              <div className="modal-zone">
-                {signal.dca_data.zone_type}: {signal.dca_data.zone_low} — {signal.dca_data.zone_high}
-              </div>
-            )}
-          </div>
-        )}
-
-        {signal.ai_analysis && (
-          <div className="modal-ai-section">
-            <h3 className="modal-section-title">AI Анализ</h3>
-            <p className="modal-ai-text">{signal.ai_analysis.reasoning || JSON.stringify(signal.ai_analysis)}</p>
           </div>
         )}
 
@@ -258,6 +267,13 @@ const SignalModal = ({ signal, onClose }) => {
             </div>
           </div>
         )}
+
+        {signal.ai_analysis && (
+          <div className="modal-ai-section">
+            <h3 className="modal-section-title">AI Анализ</h3>
+            <p className="modal-ai-text">{signal.ai_analysis.reasoning || JSON.stringify(signal.ai_analysis)}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -270,80 +286,44 @@ const InfoBlock = ({ label, value, color, accent }) => (
   </div>
 );
 
-const SignalsTable = ({ signals, onSelect }) => {
-  if (!signals.length) {
-    return <div className="empty" data-testid="signals-empty">Нет сигналов из Tradium</div>;
-  }
+const CheckCell = ({ id, selected, onToggle }) => (
+  <td className="check-cell" onClick={e => e.stopPropagation()}>
+    <input type="checkbox" checked={selected.has(id)} onChange={() => onToggle(id)} data-testid={`check-${id}`} />
+  </td>
+);
+
+const SignalsTable = ({ signals, onSelect, selected, onToggle }) => {
+  if (!signals.length) return <div className="empty" data-testid="signals-empty">Нет сигналов из Tradium</div>;
 
   return (
     <div className="table-wrap" data-testid="signals-table">
       <table>
         <thead>
           <tr>
-            <th>Время</th>
-            <th>Пара</th>
-            <th>TF</th>
-            <th>Направление</th>
-            <th>DCA #4</th>
-            <th>Entry</th>
-            <th>TP</th>
-            <th>SL</th>
-            <th>R:R</th>
-            <th>Тренд</th>
-            <th>Статус</th>
+            <th className="th-check"></th>
+            <th>Время</th><th>Пара</th><th>TF</th><th>Направление</th><th>DCA #4</th>
+            <th>Entry</th><th>TP</th><th>SL</th><th>R:R</th><th>Тренд</th><th>Статус</th>
           </tr>
         </thead>
         <tbody>
           {signals.map((s, i) => {
             const isShort = s.direction === "SHORT" || s.direction === "SELL";
-            const statusCls = {
-              watching: "status-watching",
-              dca4_reached: "status-dca4",
-              entered: "status-entered",
-              tp_hit: "status-tp",
-              sl_hit: "status-sl",
-              rejected: "status-rejected",
-              accepted: "status-entered"
-            };
-            const statusText = {
-              watching: "Слежу",
-              dca4_reached: "DCA#4",
-              entered: "Вход",
-              tp_hit: "TP",
-              sl_hit: "SL",
-              rejected: "Откл.",
-              accepted: "Принят"
-            };
-            const time = s.timestamp ? new Date(s.timestamp).toLocaleString("ru-RU", {
-              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-            }) : "—";
-
+            const id = s.id;
+            const time = s.timestamp ? new Date(s.timestamp).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
             return (
-              <tr 
-                key={s.id || i} 
-                data-testid={`signal-row-${i}`}
-                className="clickable-row"
-                onClick={() => onSelect(s)}
-              >
+              <tr key={id || i} data-testid={`signal-row-${i}`} className={`clickable-row ${selected.has(id) ? "row-selected" : ""}`} onClick={() => onSelect(s)}>
+                <CheckCell id={id} selected={selected} onToggle={onToggle} />
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
                 <td className="mono dim">{s.timeframe || "—"}</td>
-                <td>
-                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
-                    {isShort ? "SHORT" : "LONG"}
-                  </span>
-                </td>
+                <td><span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>{isShort ? "SHORT" : "LONG"}</span></td>
                 <td className="mono accent">{s.dca4_level || "—"}</td>
                 <td className="mono">{fmt(s.entry_price)}</td>
                 <td className="mono green">{fmt(s.take_profit)}</td>
                 <td className="mono red">{fmt(s.stop_loss)}</td>
                 <td className="mono bold">{s.rr_ratio || "—"}</td>
                 <td className="trend-cell">{s.trend || "—"}</td>
-                <td>
-                  <span className={`status ${statusCls[s.status] || ""}`}>
-                    {statusText[s.status] || s.status}
-                  </span>
-                </td>
+                <td><span className="status status-watching">Слежу</span></td>
               </tr>
             );
           })}
@@ -353,50 +333,31 @@ const SignalsTable = ({ signals, onSelect }) => {
   );
 };
 
-const DCA4Table = ({ signals, onSelect }) => {
-  if (!signals.length) {
-    return <div className="empty" data-testid="dca4-empty">Нет сигналов на уровне DCA #4</div>;
-  }
+const DCA4Table = ({ signals, onSelect, selected, onToggle }) => {
+  if (!signals.length) return <div className="empty" data-testid="dca4-empty">Нет сигналов на уровне DCA #4</div>;
 
   return (
     <div className="table-wrap" data-testid="dca4-table">
       <table>
         <thead>
           <tr>
-            <th>Достигнут</th>
-            <th>Пара</th>
-            <th>TF</th>
-            <th>Направление</th>
-            <th>DCA #4</th>
-            <th>Цена</th>
-            <th>TP</th>
-            <th>SL</th>
-            <th>R:R</th>
-            <th>Тренд</th>
+            <th className="th-check"></th>
+            <th>Достигнут</th><th>Пара</th><th>TF</th><th>Направление</th><th>DCA #4</th>
+            <th>Цена</th><th>TP</th><th>SL</th><th>R:R</th><th>Тренд</th>
           </tr>
         </thead>
         <tbody>
           {signals.map((s, i) => {
             const isShort = s.direction === "SHORT" || s.direction === "SELL";
-            const time = s.dca4_reached_at ? new Date(s.dca4_reached_at).toLocaleString("ru-RU", {
-              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-            }) : "—";
-
+            const id = s.id;
+            const time = s.dca4_reached_at ? new Date(s.dca4_reached_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
             return (
-              <tr 
-                key={s.id || i} 
-                data-testid={`dca4-row-${i}`}
-                className="clickable-row"
-                onClick={() => onSelect(s)}
-              >
+              <tr key={id || i} data-testid={`dca4-row-${i}`} className={`clickable-row ${selected.has(id) ? "row-selected" : ""}`} onClick={() => onSelect(s)}>
+                <CheckCell id={id} selected={selected} onToggle={onToggle} />
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
                 <td className="mono dim">{s.timeframe || "—"}</td>
-                <td>
-                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
-                    {isShort ? "SHORT" : "LONG"}
-                  </span>
-                </td>
+                <td><span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>{isShort ? "SHORT" : "LONG"}</span></td>
                 <td className="mono accent">{s.dca4_level || "—"}</td>
                 <td className="mono">{fmt(s.dca4_reached_price)}</td>
                 <td className="mono green">{fmt(s.take_profit)}</td>
@@ -412,52 +373,32 @@ const DCA4Table = ({ signals, onSelect }) => {
   );
 };
 
-const ConfirmedTable = ({ signals, onSelect }) => {
-  if (!signals.length) {
-    return <div className="empty" data-testid="confirmed-empty">Нет подтверждённых сигналов</div>;
-  }
+const ConfirmedTable = ({ signals, onSelect, selected, onToggle }) => {
+  if (!signals.length) return <div className="empty" data-testid="confirmed-empty">Нет подтверждённых сигналов</div>;
 
   return (
     <div className="table-wrap" data-testid="confirmed-table">
       <table>
         <thead>
           <tr>
-            <th>Время входа</th>
-            <th>Пара</th>
-            <th>TF</th>
-            <th>Направление</th>
-            <th>Паттерн</th>
-            <th>Сила</th>
-            <th>DCA #4</th>
-            <th>Цена входа</th>
-            <th>TP</th>
-            <th>SL</th>
-            <th>R:R</th>
+            <th className="th-check"></th>
+            <th>Время входа</th><th>Пара</th><th>TF</th><th>Направление</th><th>Паттерн</th>
+            <th>Сила</th><th>DCA #4</th><th>Цена входа</th><th>TP</th><th>SL</th><th>R:R</th>
           </tr>
         </thead>
         <tbody>
           {signals.map((s, i) => {
             const isShort = s.direction === "SHORT" || s.direction === "SELL";
-            const time = s.trigger_time ? new Date(s.trigger_time).toLocaleString("ru-RU", {
-              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-            }) : "—";
+            const id = s.id;
+            const time = s.trigger_time ? new Date(s.trigger_time).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
             const strength = s.pattern_strength ? `${(s.pattern_strength * 100).toFixed(0)}%` : "—";
-
             return (
-              <tr 
-                key={s.id || i} 
-                data-testid={`confirmed-row-${i}`}
-                className="clickable-row"
-                onClick={() => onSelect(s)}
-              >
+              <tr key={id || i} data-testid={`confirmed-row-${i}`} className={`clickable-row ${selected.has(id) ? "row-selected" : ""}`} onClick={() => onSelect(s)}>
+                <CheckCell id={id} selected={selected} onToggle={onToggle} />
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
                 <td className="mono dim">{s.timeframe || "—"}</td>
-                <td>
-                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
-                    {isShort ? "SHORT" : "LONG"}
-                  </span>
-                </td>
+                <td><span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>{isShort ? "SHORT" : "LONG"}</span></td>
                 <td className="mono">{s.reversal_pattern || "—"}</td>
                 <td className="mono green">{strength}</td>
                 <td className="mono accent">{s.dca4_level || "—"}</td>
@@ -474,86 +415,51 @@ const ConfirmedTable = ({ signals, onSelect }) => {
   );
 };
 
-const EntriesTable = ({ entries, onSelect }) => {
-  if (!entries.length) {
-    return <div className="empty" data-testid="entries-empty">Нет результатов</div>;
-  }
+const EntriesTable = ({ entries, onSelect, selected, onToggle }) => {
+  if (!entries.length) return <div className="empty" data-testid="entries-empty">Нет результатов</div>;
 
   return (
     <div className="table-wrap" data-testid="entries-table">
       <table>
         <thead>
           <tr>
-            <th>Время входа</th>
-            <th>Пара</th>
-            <th>Тип</th>
-            <th>Направление</th>
-            <th>Цена входа</th>
-            <th>DCA #4</th>
-            <th>TP</th>
-            <th>SL</th>
-            <th>R:R</th>
-            <th>P&L</th>
-            <th>Статус</th>
+            <th className="th-check"></th>
+            <th>Время входа</th><th>Пара</th><th>Тип</th><th>Направление</th><th>Цена входа</th>
+            <th>DCA #4</th><th>TP</th><th>SL</th><th>R:R</th><th>P&L</th><th>Статус</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((e, i) => {
             const isShort = e.direction === "SHORT" || e.direction === "SELL";
-            const time = e.triggered_at ? new Date(e.triggered_at).toLocaleString("ru-RU", {
-              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-            }) : "—";
+            const id = e.signal_id;
+            const time = e.triggered_at ? new Date(e.triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
-            let pnl = "";
-            let pnlCls = "";
+            let pnl = "", pnlCls = "";
             if (e.close_price && e.entry_price) {
-              const diff = isShort 
-                ? ((e.entry_price - e.close_price) / e.entry_price) * 100
-                : ((e.close_price - e.entry_price) / e.entry_price) * 100;
+              const diff = isShort ? ((e.entry_price - e.close_price) / e.entry_price) * 100 : ((e.close_price - e.entry_price) / e.entry_price) * 100;
               pnl = `${diff > 0 ? "+" : ""}${diff.toFixed(2)}%`;
               pnlCls = diff > 0 ? "green" : "red";
             }
 
-            const statusCls = {
-              OPEN: "status-watching",
-              TP_HIT: "status-tp",
-              SL_HIT: "status-sl"
-            };
-            const statusText = {
-              OPEN: "Открыта",
-              TP_HIT: "TP",
-              SL_HIT: "SL"
-            };
-
+            const statusCls = { OPEN: "status-watching", TP_HIT: "status-tp", SL_HIT: "status-sl" };
+            const statusText = { OPEN: "Открыта", TP_HIT: "TP", SL_HIT: "SL" };
             const entryType = e.entry_type || "—";
             const typeCls = entryType === "DCA#4" ? "status-dca4" : entryType === "Разворот" ? "status-entered" : "";
 
             return (
-              <tr 
-                key={e.signal_id || i} 
-                data-testid={`entry-row-${i}`}
-                className="clickable-row"
-                onClick={() => onSelect(e)}
-              >
+              <tr key={id || i} data-testid={`entry-row-${i}`} className={`clickable-row ${selected.has(id) ? "row-selected" : ""}`} onClick={() => onSelect(e)}>
+                <CheckCell id={id} selected={selected} onToggle={onToggle} />
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{e.symbol?.replace("USDT", "")}</td>
                 <td><span className={`status ${typeCls}`}>{entryType}</span></td>
-                <td>
-                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
-                    {isShort ? "SHORT" : "LONG"}
-                  </span>
-                </td>
+                <td><span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>{isShort ? "SHORT" : "LONG"}</span></td>
                 <td className="mono">{fmt(e.entry_price)}</td>
                 <td className="mono accent">{fmt(e.dca4_level)}</td>
                 <td className="mono green">{fmt(e.take_profit)}</td>
                 <td className="mono red">{fmt(e.stop_loss)}</td>
                 <td className="mono bold">{e.rr_ratio || "—"}</td>
                 <td className={`mono bold ${pnlCls}`}>{pnl || "—"}</td>
-                <td>
-                  <span className={`status ${statusCls[e.status] || ""}`}>
-                    {statusText[e.status] || e.status}
-                  </span>
-                </td>
+                <td><span className={`status ${statusCls[e.status] || ""}`}>{statusText[e.status] || e.status}</span></td>
               </tr>
             );
           })}
