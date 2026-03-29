@@ -34,7 +34,10 @@ db = mongo_client[db_name]
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
 main_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("📋 Сигналы"), KeyboardButton("🕯 Подтверждённые"), KeyboardButton("🎯 Выполненные")]],
+    [
+        [KeyboardButton("📋 Tradium"), KeyboardButton("📍 DCA#4")],
+        [KeyboardButton("🕯 Вход+Разворот"), KeyboardButton("📊 Результаты")]
+    ],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -65,35 +68,48 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     signals = await db.signals.find(
-        {}, {"_id": 0}
+        {"status": "watching"}, {"_id": 0}
     ).sort("timestamp", -1).limit(10).to_list(10)
 
     if not signals:
-        await update.message.reply_text("📋 Нет сигналов", reply_markup=main_keyboard)
+        await update.message.reply_text("📋 Нет входящих сигналов", reply_markup=main_keyboard)
         return
 
-    text = "📋 <b>СИГНАЛЫ TRADIUM</b>\n\n"
+    text = "📋 <b>TRADIUM — ВХОДЯЩИЕ</b>\n\n"
 
     for s in signals:
-        status = s.get('status', 'watching')
-        if status == 'watching':
-            icon = "👀"
-        elif status == 'dca4_reached':
-            icon = "📍"
-        elif status == 'entered':
-            icon = "🎯"
-        elif status == 'tp_hit':
-            icon = "✅"
-        elif status == 'sl_hit':
-            icon = "❌"
-        else:
-            icon = "📋"
-
         dir_icon = "🟢" if s.get('direction') == 'LONG' else "🔴"
         dca4 = s.get('dca4_level', 'N/A')
 
-        text += f"{icon} {dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
+        text += f"👀 {dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
         text += f"    DCA#4: <code>{dca4}</code> | TP: <code>{s.get('take_profit', '?')}</code> | SL: <code>{s.get('stop_loss', '?')}</code>\n\n"
+
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+
+
+async def dca4_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    signals = await db.signals.find(
+        {"status": "dca4_reached"}, {"_id": 0}
+    ).sort("dca4_reached_at", -1).limit(10).to_list(10)
+
+    if not signals:
+        text = "📍 <b>DCA #4</b>\n\n"
+        text += "Нет сигналов на уровне DCA #4\n"
+        text += "Ожидаем достижения цены...\n"
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
+        return
+
+    text = "📍 <b>DCA #4 — ЖДЁМ РАЗВОРОТ</b>\n\n"
+
+    for s in signals:
+        dir_icon = "🟢" if s.get('direction') == 'LONG' else "🔴"
+        dca4 = s.get('dca4_level', 'N/A')
+        price = s.get('dca4_reached_price', '?')
+
+        text += f"📍 {dir_icon} <b>{s.get('symbol', '?')}</b> ({s.get('timeframe', '?')})\n"
+        text += f"    DCA#4: <code>{dca4}</code> | Цена: <code>{price}</code>\n"
+        text += f"    TP: <code>{s.get('take_profit', '?')}</code> | SL: <code>{s.get('stop_loss', '?')}</code>\n"
+        text += "    ⏳ Жду разворотную свечу...\n\n"
 
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
 
@@ -127,21 +143,18 @@ async def confirmed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
 
 
-async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def results_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = await db.entry_signals.find(
         {}, {"_id": 0}
     ).sort("triggered_at", -1).limit(10).to_list(10)
 
-    watching = await db.signals.count_documents({"status": "watching", "dca4_level": {"$ne": None}})
-
     if not entries:
-        text = "🎯 <b>ВЫПОЛНЕННЫЕ СИГНАЛЫ</b>\n\n"
-        text += "Нет выполненных сигналов\n\n"
-        text += f"⏳ Ожидают DCA #4: <b>{watching}</b> сигналов\n"
+        text = "📊 <b>РЕЗУЛЬТАТЫ</b>\n\n"
+        text += "Нет завершённых сделок\n"
         await update.message.reply_text(text, parse_mode='HTML', reply_markup=main_keyboard)
         return
 
-    text = "🎯 <b>ВЫПОЛНЕННЫЕ СИГНАЛЫ</b>\n\n"
+    text = "📊 <b>РЕЗУЛЬТАТЫ</b>\n\n"
 
     for e in entries:
         dir_icon = "🟢 LONG" if e.get('direction') == 'LONG' else "🔴 SHORT"
@@ -157,9 +170,8 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += f"{s_icon} {dir_icon} <b>{e.get('symbol', '?')}</b>\n"
         text += f"    Вход: <code>{e.get('entry_price', '?')}</code>\n"
-        text += f"    TP: <code>{e.get('take_profit', '?')}</code>\n"
-        text += f"    SL: <code>{e.get('stop_loss', '?')}</code>\n"
-        text += f"    R:R: <code>{e.get('rr_ratio', '?')}</code>\n"
+        text += f"    TP: <code>{e.get('take_profit', '?')}</code> | SL: <code>{e.get('stop_loss', '?')}</code>\n"
+        text += f"    Паттерн: {e.get('reversal_pattern', '—')}\n"
         text += f"    Статус: <b>{status}</b>\n\n"
 
     tp_count = await db.entry_signals.count_documents({"status": "TP_HIT"})
@@ -175,11 +187,11 @@ async def entries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📡 <b>Tradium Signal Monitor</b>\n\n"
-        "Бот автоматически мониторит сигналы.\n"
-        "Оповещение приходит когда цена\n"
-        "достигает уровня DCA #4.\n\n"
-        "📋 Сигналы — список сигналов\n"
-        "🎯 Выполненные — выполненные позиции",
+        "Бот автоматически мониторит сигналы.\n\n"
+        "📋 Tradium — входящие сигналы\n"
+        "📍 DCA#4 — ждём разворот\n"
+        "🕯 Вход+Разворот — подтверждённые\n"
+        "📊 Результаты — TP/SL",
         parse_mode='HTML',
         reply_markup=main_keyboard
     )
@@ -187,12 +199,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if "Сигналы" in text:
+    if "Tradium" in text:
         await signals_command(update, context)
-    elif "Подтверждённые" in text:
+    elif "DCA" in text:
+        await dca4_command(update, context)
+    elif "Разворот" in text:
         await confirmed_command(update, context)
-    elif "Выполненные" in text:
-        await entries_command(update, context)
+    elif "Результат" in text:
+        await results_command(update, context)
 
 
 def main():
@@ -200,18 +214,20 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN not set!")
         return
 
-    logger.info("Starting Telegram bot v3...")
+    logger.info("Starting Telegram bot v4...")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("signals", signals_command))
+    application.add_handler(CommandHandler("dca4", dca4_command))
     application.add_handler(CommandHandler("confirmed", confirmed_command))
-    application.add_handler(CommandHandler("entries", entries_command))
-    application.add_handler(MessageHandler(filters.Regex(r"📋 Сигналы"), signals_command))
-    application.add_handler(MessageHandler(filters.Regex(r"🕯 Подтверждённые"), confirmed_command))
-    application.add_handler(MessageHandler(filters.Regex(r"🎯 Выполненные"), entries_command))
+    application.add_handler(CommandHandler("results", results_command))
+    application.add_handler(MessageHandler(filters.Regex(r"📋 Tradium"), signals_command))
+    application.add_handler(MessageHandler(filters.Regex(r"📍 DCA"), dca4_command))
+    application.add_handler(MessageHandler(filters.Regex(r"🕯 Вход"), confirmed_command))
+    application.add_handler(MessageHandler(filters.Regex(r"📊 Результат"), results_command))
 
     logger.info("Bot started! Waiting for messages...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

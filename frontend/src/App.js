@@ -7,7 +7,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 function App() {
-  const [tab, setTab] = useState("signals");
+  const [tab, setTab] = useState("tradium");
   const [signals, setSignals] = useState([]);
   const [entries, setEntries] = useState([]);
   const [stats, setStats] = useState(null);
@@ -46,8 +46,9 @@ function App() {
     );
   }
 
+  const tradiumSignals = signals.filter(s => s.status === "watching");
+  const dca4Signals = signals.filter(s => s.status === "dca4_reached");
   const confirmedSignals = signals.filter(s => s.status === "entered");
-  const tradiumSignals = signals.filter(s => s.status !== "entered");
 
   return (
     <div className="app">
@@ -70,38 +71,48 @@ function App() {
 
       <div className="tabs">
         <button 
-          data-testid="tab-signals"
-          className={`tab ${tab === "signals" ? "active" : ""}`} 
-          onClick={() => setTab("signals")}
+          data-testid="tab-tradium"
+          className={`tab ${tab === "tradium" ? "active" : ""}`} 
+          onClick={() => setTab("tradium")}
         >
-          Сигналы Tradium
+          Tradium
           <span className="tab-count">{tradiumSignals.length}</span>
+        </button>
+        <button 
+          data-testid="tab-dca4"
+          className={`tab ${tab === "dca4" ? "active" : ""}`} 
+          onClick={() => setTab("dca4")}
+        >
+          DCA#4
+          <span className="tab-count">{dca4Signals.length}</span>
         </button>
         <button 
           data-testid="tab-confirmed"
           className={`tab ${tab === "confirmed" ? "active" : ""}`} 
           onClick={() => setTab("confirmed")}
         >
-          Подтверждённые
+          Вход + Разворот
           <span className="tab-count">{confirmedSignals.length}</span>
         </button>
         <button 
-          data-testid="tab-entries"
-          className={`tab ${tab === "entries" ? "active" : ""}`} 
-          onClick={() => setTab("entries")}
+          data-testid="tab-results"
+          className={`tab ${tab === "results" ? "active" : ""}`} 
+          onClick={() => setTab("results")}
         >
-          Выполненные
+          Результаты
           <span className="tab-count">{entries.length}</span>
         </button>
       </div>
 
       <main className="content">
-        {tab === "signals" ? (
+        {tab === "tradium" ? (
           <SignalsTable signals={tradiumSignals} onSelect={setSelectedSignal} />
+        ) : tab === "dca4" ? (
+          <DCA4Table signals={dca4Signals} onSelect={setSelectedSignal} />
         ) : tab === "confirmed" ? (
           <ConfirmedTable signals={confirmedSignals} onSelect={setSelectedSignal} />
         ) : (
-          <EntriesTable entries={entries} />
+          <EntriesTable entries={entries} onSelect={setSelectedSignal} />
         )}
       </main>
 
@@ -342,6 +353,65 @@ const SignalsTable = ({ signals, onSelect }) => {
   );
 };
 
+const DCA4Table = ({ signals, onSelect }) => {
+  if (!signals.length) {
+    return <div className="empty" data-testid="dca4-empty">Нет сигналов на уровне DCA #4</div>;
+  }
+
+  return (
+    <div className="table-wrap" data-testid="dca4-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Достигнут</th>
+            <th>Пара</th>
+            <th>TF</th>
+            <th>Направление</th>
+            <th>DCA #4</th>
+            <th>Цена</th>
+            <th>TP</th>
+            <th>SL</th>
+            <th>R:R</th>
+            <th>Тренд</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signals.map((s, i) => {
+            const isShort = s.direction === "SHORT" || s.direction === "SELL";
+            const time = s.dca4_reached_at ? new Date(s.dca4_reached_at).toLocaleString("ru-RU", {
+              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+            }) : "—";
+
+            return (
+              <tr 
+                key={s.id || i} 
+                data-testid={`dca4-row-${i}`}
+                className="clickable-row"
+                onClick={() => onSelect(s)}
+              >
+                <td className="mono dim">{time}</td>
+                <td className="mono bold">{s.symbol?.replace("USDT", "")}</td>
+                <td className="mono dim">{s.timeframe || "—"}</td>
+                <td>
+                  <span className={`dir ${isShort ? "dir-short" : "dir-long"}`}>
+                    {isShort ? "SHORT" : "LONG"}
+                  </span>
+                </td>
+                <td className="mono accent">{s.dca4_level || "—"}</td>
+                <td className="mono">{fmt(s.dca4_reached_price)}</td>
+                <td className="mono green">{fmt(s.take_profit)}</td>
+                <td className="mono red">{fmt(s.stop_loss)}</td>
+                <td className="mono bold">{s.rr_ratio || "—"}</td>
+                <td className="trend-cell">{s.trend || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const ConfirmedTable = ({ signals, onSelect }) => {
   if (!signals.length) {
     return <div className="empty" data-testid="confirmed-empty">Нет подтверждённых сигналов</div>;
@@ -404,9 +474,9 @@ const ConfirmedTable = ({ signals, onSelect }) => {
   );
 };
 
-const EntriesTable = ({ entries }) => {
+const EntriesTable = ({ entries, onSelect }) => {
   if (!entries.length) {
-    return <div className="empty" data-testid="entries-empty">Нет выполненных сигналов</div>;
+    return <div className="empty" data-testid="entries-empty">Нет результатов</div>;
   }
 
   return (
@@ -456,7 +526,12 @@ const EntriesTable = ({ entries }) => {
             };
 
             return (
-              <tr key={e.signal_id || i} data-testid={`entry-row-${i}`}>
+              <tr 
+                key={e.signal_id || i} 
+                data-testid={`entry-row-${i}`}
+                className="clickable-row"
+                onClick={() => onSelect(e)}
+              >
                 <td className="mono dim">{time}</td>
                 <td className="mono bold">{e.symbol?.replace("USDT", "")}</td>
                 <td>
