@@ -57,15 +57,16 @@ body {
 
 /* Refresh button */
 .refresh-btn {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 14px; border-radius: 4px;
-  background: var(--bg3); border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 18px; border-radius: 4px;
+  background: #1a3a2a; border: 1px solid var(--accent);
   color: var(--accent); font-family: var(--mono);
-  font-size: 12px; font-weight: 600;
+  font-size: 13px; font-weight: 700;
   cursor: pointer; transition: all 0.2s;
   letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
-.refresh-btn:hover { background: var(--border); border-color: var(--accent); }
+.refresh-btn:hover { background: #1e4d35; box-shadow: 0 0 12px rgba(0, 255, 136, 0.2); }
 .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .refresh-btn.refreshing .refresh-icon { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

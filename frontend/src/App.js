@@ -92,7 +92,12 @@ function App() {
       const res = await axios.post(`${API}/signals/refresh`);
       const d = res.data;
       if (d.status === "ok") {
-        toast.success(`Обновлено! Добавлено: ${d.added}, пропущено: ${d.skipped}`);
+        if (d.added > 0) {
+          const symbols = d.added_symbols ? d.added_symbols.join(", ") : "";
+          toast.success(`Добавлено ${d.added} сигналов: ${symbols}`, { duration: 6000 });
+        } else {
+          toast.info("Новых сигналов нет — всё актуально", { duration: 3000 });
+        }
         fetchData();
       } else if (d.status === "busy") {
         toast.info("Обновление уже идёт, подождите...");
@@ -222,8 +227,10 @@ const StatPill = ({ label, value, color = "default" }) => {
 const SignalModal = ({ signal, onClose }) => {
   const [chartUrl, setChartUrl] = useState(null);
   const [chartLoading, setChartLoading] = useState(true);
+  const [chartError, setChartError] = useState(false);
 
   useEffect(() => {
+    setChartError(false);
     if (signal.chart_path) {
       const filename = signal.chart_path.split("/").pop();
       setChartUrl(`${API}/charts/${filename}`);
@@ -258,10 +265,17 @@ const SignalModal = ({ signal, onClose }) => {
 
         {chartLoading ? (
           <div className="modal-chart-loading">Загрузка графика...</div>
-        ) : chartUrl ? (
-          <div className="modal-chart"><img src={chartUrl} alt={`Chart ${signal.symbol}`} data-testid="signal-chart-img" /></div>
+        ) : chartUrl && !chartError ? (
+          <div className="modal-chart">
+            <img
+              src={chartUrl}
+              alt={`Chart ${signal.symbol}`}
+              data-testid="signal-chart-img"
+              onError={() => setChartError(true)}
+            />
+          </div>
         ) : (
-          <div className="modal-no-chart">Нет графика</div>
+          <div className="modal-no-chart">{chartError ? "Не удалось загрузить график" : "Нет графика"}</div>
         )}
 
         <div className="modal-grid">

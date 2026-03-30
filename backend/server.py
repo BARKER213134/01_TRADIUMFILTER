@@ -761,6 +761,7 @@ async def refresh_signals():
 
             added = 0
             skipped = 0
+            added_symbols = []
 
             for msg in messages:
                 text = msg.text or ""
@@ -838,6 +839,7 @@ async def refresh_signals():
                 }
                 await db.signals.insert_one(doc)
                 added += 1
+                added_symbols.append(f"{parsed['direction']} {parsed['symbol']}")
 
             await tg_client.disconnect()
             # Cleanup temp session
@@ -850,6 +852,7 @@ async def refresh_signals():
                 "status": "ok",
                 "added": added,
                 "skipped": skipped,
+                "added_symbols": added_symbols,
                 "message": f"Добавлено: {added}, пропущено: {skipped}"
             }
 
