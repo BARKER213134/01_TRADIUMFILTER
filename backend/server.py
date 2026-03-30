@@ -28,14 +28,9 @@ load_dotenv(ROOT_DIR / '.env', override=True)
 
 def is_preview_env() -> bool:
     """Detect if running in preview/agent environment (not production).
-    Supervisor sets APP_URL — preview URLs contain 'preview.emergentagent.com'.
-    Also checks filesystem markers as fallback."""
+    Supervisor sets APP_URL — preview URLs contain 'preview.emergentagent.com'."""
     app_url = os.environ.get("APP_URL", "")
-    if "preview.emergentagent.com" in app_url:
-        return True
-    if Path("/opt/plugins-venv").exists():
-        return True
-    return False
+    return "preview.emergentagent.com" in app_url
 
 
 IS_PREVIEW = is_preview_env()
