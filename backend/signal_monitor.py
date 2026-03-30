@@ -24,7 +24,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from motor.motor_asyncio import AsyncIOMotorClient
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env', override=True)
 
 logging.basicConfig(
     level=logging.INFO,
