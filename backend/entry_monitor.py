@@ -316,6 +316,11 @@ async def check_dca4_entries():
                 triggered = True
 
             if triggered:
+                # Dedup: skip if entry already exists
+                existing = await db.entry_signals.find_one({"signal_id": signal['id'] + "_dca4"})
+                if existing:
+                    continue
+
                 logger.info(f"📍 Stage 1: DCA#4 HIT! {symbol} {direction} @ {price} (DCA#4={dca4})")
 
                 alert_text = format_dca4_reached(signal, price)
@@ -377,6 +382,11 @@ async def check_reversal_candles():
             pattern = detect_reversal_pattern(symbol, timeframe, direction)
 
             if pattern:
+                # Dedup: skip if reversal entry already exists
+                existing = await db.entry_signals.find_one({"signal_id": signal['id'] + "_reversal"})
+                if existing:
+                    continue
+
                 price = await get_price(symbol)
                 if price <= 0:
                     continue
@@ -427,12 +437,19 @@ async def check_reversal_candles():
 # ========== TP/SL monitoring ==========
 
 async def check_tp_sl():
-    """Check if open positions hit TP or SL"""
+    """Check if open positions hit TP or SL — one notification per parent signal"""
     open_signals = await db.entry_signals.find(
         {"status": "OPEN"}, {"_id": 0}
     ).to_list(100)
 
+    # Group by signal_ref to avoid duplicate alerts for same parent signal
+    by_ref = {}
     for signal in open_signals:
+        ref = signal.get('signal_ref', signal.get('signal_id', ''))
+        if ref not in by_ref:
+            by_ref[ref] = signal  # take first (usually DCA#4)
+
+    for ref, signal in by_ref.items():
         try:
             symbol = signal.get('symbol', '')
             price = await get_price(symbol)
@@ -456,11 +473,13 @@ async def check_tp_sl():
                     result = "SL_HIT"
 
             if result:
+                # Send ONE alert
                 alert_text = format_tp_sl_alert(signal, price, result)
                 await send_alert(alert_text)
 
-                await db.entry_signals.update_one(
-                    {"signal_id": signal['signal_id']},
+                # Close ALL entry_signals for this parent signal
+                await db.entry_signals.update_many(
+                    {"signal_ref": ref},
                     {"$set": {
                         "status": result,
                         "closed_at": datetime.now(timezone.utc).isoformat(),
@@ -468,8 +487,9 @@ async def check_tp_sl():
                     }}
                 )
 
+                # Update parent signal status
                 await db.signals.update_one(
-                    {"id": signal['signal_id']},
+                    {"id": ref},
                     {"$set": {"status": result.lower()}}
                 )
 

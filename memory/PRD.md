@@ -28,14 +28,14 @@
 ### Core Logic
 - [x] Двухэтапное подтверждение (DCA#4 + 8 свечных паттернов)
 - [x] 2 уведомления: при DCA#4 и при разворотной свече
-- [x] TP/SL мониторинг
-- [x] **Environment isolation**: Preview pod НЕ запускает Telegram воркеры → нет конфликтов с production (Fixed 2026-03-30)
+- [x] TP/SL мониторинг — **одно уведомление на сигнал** (Fixed 2026-03-30)
+- [x] **Environment isolation**: Preview НЕ запускает воркеры (Fixed 2026-03-30)
 
-### Environment Isolation (P0 fix)
-- [x] `is_preview_env()` в server.py — определяет preview по APP_URL и /opt/plugins-venv
-- [x] Preview: API + UI работают, воркеры отключены
-- [x] Production: все воркеры запускаются автоматически
-- [x] `/api/health` показывает режим (preview/production)
+### Fixes (2026-03-30)
+- [x] Preview/Production isolation — preview не конфликтует с production
+- [x] Дедупликация entry_signals — проверка перед вставкой
+- [x] TP/SL группировка по signal_ref — одно уведомление вместо множества
+- [x] Правильное обновление parent signal при TP/SL (signal_ref вместо signal_id)
 
 ## Поток статусов
 `watching` → `dca4_reached` → `entered` → `tp_hit` / `sl_hit`
