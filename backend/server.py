@@ -25,6 +25,21 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env', override=True)
 
+
+def is_preview_env() -> bool:
+    """Detect if running in preview/agent environment (not production).
+    Supervisor sets APP_URL — preview URLs contain 'preview.emergentagent.com'.
+    Also checks filesystem markers as fallback."""
+    app_url = os.environ.get("APP_URL", "")
+    if "preview.emergentagent.com" in app_url:
+        return True
+    if Path("/opt/plugins-venv").exists():
+        return True
+    return False
+
+
+IS_PREVIEW = is_preview_env()
+
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -533,6 +548,21 @@ async def delete_entries_batch(data: dict):
 @api_router.get("/health")
 async def health_check():
     """Health check with worker status"""
+    if IS_PREVIEW:
+        db_ok = False
+        try:
+            await db.signals.count_documents({})
+            db_ok = True
+        except Exception:
+            pass
+        return {
+            "status": "preview",
+            "mode": "preview — workers disabled to avoid Telegram conflicts",
+            "workers": {k: {"running": False, "status": v} for k, v in worker_status.items()},
+            "db_connected": db_ok,
+            "telethon_session": (ROOT_DIR / "telethon_session.session").exists(),
+        }
+
     ws = {}
     for name, task in worker_tasks.items():
         ws[name] = {
@@ -551,6 +581,7 @@ async def health_check():
 
     return {
         "status": "ok" if all(not t.done() for t in worker_tasks.values()) else "degraded",
+        "mode": "production",
         "workers": ws,
         "db_connected": db_ok,
         "telethon_session": session_exists,
@@ -802,8 +833,15 @@ async def run_telegram_bot():
 
 @app.on_event("startup")
 async def startup_workers():
-    """Start all background workers as asyncio tasks"""
-    logger.info(f"🔧 Starting background workers in-process from {ROOT_DIR}...")
+    """Start all background workers as asyncio tasks — ONLY in production"""
+    if IS_PREVIEW:
+        logger.info("⚠️ PREVIEW environment detected — background workers DISABLED to avoid Telegram conflicts")
+        worker_status["signal_monitor"] = "disabled (preview)"
+        worker_status["entry_monitor"] = "disabled (preview)"
+        worker_status["telegram_bot"] = "disabled (preview)"
+        return
+
+    logger.info(f"🚀 PRODUCTION mode — starting background workers from {ROOT_DIR}...")
 
     worker_tasks["signal_monitor"] = asyncio.create_task(run_signal_monitor())
     worker_tasks["entry_monitor"] = asyncio.create_task(run_entry_monitor())
