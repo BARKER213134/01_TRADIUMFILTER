@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 import re
 import json
@@ -25,15 +25,9 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env', override=True)
 
-
-def is_preview_env() -> bool:
-    """Detect if running in preview/agent environment (not production).
-    Supervisor sets APP_URL — preview URLs contain 'preview.emergentagent.com'."""
-    app_url = os.environ.get("APP_URL", "")
-    return "preview.emergentagent.com" in app_url
-
-
-IS_PREVIEW = is_preview_env()
+# Unique instance ID for leader election
+INSTANCE_ID = str(uuid.uuid4())[:8]
+LEADER_TTL = 45  # seconds — leader must renew within this time
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -542,21 +536,8 @@ async def delete_entries_batch(data: dict):
 
 @api_router.get("/health")
 async def health_check():
-    """Health check with worker status"""
-    if IS_PREVIEW:
-        db_ok = False
-        try:
-            await db.signals.count_documents({})
-            db_ok = True
-        except Exception:
-            pass
-        return {
-            "status": "preview",
-            "mode": "preview — workers disabled to avoid Telegram conflicts",
-            "workers": {k: {"running": False, "status": v} for k, v in worker_status.items()},
-            "db_connected": db_ok,
-            "telethon_session": (ROOT_DIR / "telethon_session.session").exists(),
-        }
+    """Health check with leader election status"""
+    lock = await db.leader_lock.find_one({"_id": "worker_leader"}, {"_id": 0})
 
     ws = {}
     for name, task in worker_tasks.items():
@@ -564,6 +545,10 @@ async def health_check():
             "running": not task.done(),
             "status": worker_status.get(name, "unknown")
         }
+
+    if not ws:
+        for name in ["signal_monitor", "entry_monitor", "telegram_bot"]:
+            ws[name] = {"running": False, "status": worker_status.get(name, "standby")}
 
     db_ok = False
     try:
@@ -574,9 +559,15 @@ async def health_check():
 
     session_exists = (ROOT_DIR / "telethon_session.session").exists()
 
+    current_leader = lock.get("instance_id", "none") if lock else "none"
+    leader_expires = lock.get("expires_at").isoformat() if lock and lock.get("expires_at") else "N/A"
+
     return {
-        "status": "ok" if all(not t.done() for t in worker_tasks.values()) else "degraded",
-        "mode": "production",
+        "status": "leader" if is_leader else "standby",
+        "instance_id": INSTANCE_ID,
+        "current_leader": current_leader,
+        "leader_expires": leader_expires,
+        "is_leader": is_leader,
         "workers": ws,
         "db_connected": db_ok,
         "telethon_session": session_exists,
@@ -739,6 +730,69 @@ app.add_middleware(
 # Background workers management — run as asyncio tasks in-process
 worker_tasks = {}
 worker_status = {}
+is_leader = False
+
+
+async def try_acquire_leader() -> bool:
+    """Try to become the leader via MongoDB atomic upsert. Returns True if we are leader."""
+    now = datetime.now(timezone.utc)
+    try:
+        result = await db.leader_lock.find_one_and_update(
+            {
+                "_id": "worker_leader",
+                "$or": [
+                    {"expires_at": {"$lt": now}},
+                    {"instance_id": INSTANCE_ID},
+                ]
+            },
+            {"$set": {
+                "instance_id": INSTANCE_ID,
+                "expires_at": now + timedelta(seconds=LEADER_TTL),
+                "updated_at": now,
+            }},
+            upsert=True,
+            return_document=True,
+        )
+        return result is not None and result.get("instance_id") == INSTANCE_ID
+    except Exception as e:
+        # Duplicate key on upsert race → another instance won
+        if "duplicate key" in str(e).lower() or "E11000" in str(e):
+            return False
+        logger.error(f"Leader election error: {e}")
+        return False
+
+
+async def release_leader():
+    """Release leadership on shutdown."""
+    try:
+        await db.leader_lock.delete_one({"_id": "worker_leader", "instance_id": INSTANCE_ID})
+    except Exception:
+        pass
+
+
+async def start_workers():
+    """Start all background worker tasks."""
+    global is_leader
+    is_leader = True
+    logger.info(f"👑 Instance {INSTANCE_ID} is now LEADER — starting workers...")
+
+    worker_tasks["signal_monitor"] = asyncio.create_task(run_signal_monitor())
+    worker_tasks["entry_monitor"] = asyncio.create_task(run_entry_monitor())
+    worker_tasks["telegram_bot"] = asyncio.create_task(run_telegram_bot())
+    worker_status["signal_monitor"] = "starting"
+    worker_status["entry_monitor"] = "starting"
+    worker_status["telegram_bot"] = "starting"
+
+
+async def stop_workers():
+    """Stop all background worker tasks."""
+    global is_leader
+    is_leader = False
+    for name, task in list(worker_tasks.items()):
+        task.cancel()
+        logger.info(f"Cancelled worker: {name}")
+    worker_tasks.clear()
+    worker_status.clear()
 
 
 async def run_signal_monitor():
@@ -828,27 +882,42 @@ async def run_telegram_bot():
 
 @app.on_event("startup")
 async def startup_workers():
-    """Start all background workers as asyncio tasks — ONLY in production"""
-    if IS_PREVIEW:
-        logger.info("⚠️ PREVIEW environment detected — background workers DISABLED to avoid Telegram conflicts")
-        worker_status["signal_monitor"] = "disabled (preview)"
-        worker_status["entry_monitor"] = "disabled (preview)"
-        worker_status["telegram_bot"] = "disabled (preview)"
-        return
+    """Start leader election loop — only the leader runs workers."""
+    logger.info(f"🔧 Instance {INSTANCE_ID} starting leader election...")
 
-    logger.info(f"🚀 PRODUCTION mode — starting background workers from {ROOT_DIR}...")
+    async def leader_loop():
+        global is_leader
+        while True:
+            try:
+                got_leader = await try_acquire_leader()
 
-    worker_tasks["signal_monitor"] = asyncio.create_task(run_signal_monitor())
-    worker_tasks["entry_monitor"] = asyncio.create_task(run_entry_monitor())
-    worker_tasks["telegram_bot"] = asyncio.create_task(run_telegram_bot())
+                if got_leader and not is_leader:
+                    await start_workers()
+                elif not got_leader and is_leader:
+                    logger.warning(f"⚠️ Instance {INSTANCE_ID} lost leadership — stopping workers")
+                    await stop_workers()
+                elif got_leader:
+                    # Renew — already leader
+                    pass
+                else:
+                    # Not leader, not running — check current leader
+                    lock = await db.leader_lock.find_one({"_id": "worker_leader"}, {"_id": 0})
+                    if lock:
+                        logger.info(f"⏳ Standby — leader is {lock.get('instance_id', '?')}, expires {lock.get('expires_at', '?')}")
+                    else:
+                        logger.info("⏳ No leader found, will try next cycle")
 
-    logger.info("✅ All workers started as asyncio tasks")
+            except Exception as e:
+                logger.error(f"Leader loop error: {e}")
+
+            await asyncio.sleep(15)
+
+    asyncio.create_task(leader_loop())
 
 
 @app.on_event("shutdown")
 async def shutdown_all():
-    """Shutdown all workers and DB"""
-    for name, task in worker_tasks.items():
-        task.cancel()
-        logger.info(f"Cancelled worker: {name}")
+    """Shutdown all workers, release leadership, close DB"""
+    await stop_workers()
+    await release_leader()
     client.close()

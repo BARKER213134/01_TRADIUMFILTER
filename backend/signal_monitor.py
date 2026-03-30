@@ -191,6 +191,16 @@ async def process_signal(text: str, chart_path: str = None, client=None, entity=
 
     logger.info(f"📨 New signal: {signal['direction']} {signal['symbol']} ({signal['timeframe']})")
 
+    # Dedup: skip if same symbol+direction+entry already exists in last 24h
+    existing = await db.signals.find_one({
+        "symbol": signal['symbol'],
+        "direction": signal['direction'],
+        "entry_price": signal['entry_price'],
+    })
+    if existing:
+        logger.info(f"⏭ Skip duplicate: {signal['symbol']} {signal['direction']} @ {signal['entry_price']}")
+        return
+
     # Extract DCA #4 from chart
     dca_data = None
     saved_chart = None
