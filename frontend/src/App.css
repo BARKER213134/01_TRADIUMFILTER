@@ -49,6 +49,9 @@ body {
 .header-top {
   display: flex; align-items: center; justify-content: space-between;
 }
+.header-actions {
+  display: flex; align-items: center; gap: 12px;
+}
 .logo {
   font-family: var(--mono);
   font-size: 15px; font-weight: 800;
@@ -70,6 +73,27 @@ body {
 .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .refresh-btn.refreshing .refresh-icon { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* Status indicator */
+.status-indicator {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: 4px;
+  background: var(--bg3); border: 1px solid var(--border);
+  cursor: pointer; transition: all 0.2s;
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.5px; color: var(--dim);
+}
+.status-indicator:hover { border-color: rgba(255,255,255,0.2); }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-green { background: #00ff88; box-shadow: 0 0 8px rgba(0,255,136,0.5); }
+.status-yellow { background: #ffaa00; box-shadow: 0 0 8px rgba(255,170,0,0.5); }
+.status-red { background: #ff4444; box-shadow: 0 0 8px rgba(255,68,68,0.5); }
+.status-loading { background: #666; animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.status-text { color: var(--dim); text-transform: uppercase; }
 
 /* Stats pills */
 .stats-row { display: flex; gap: 8px; flex-wrap: wrap; }

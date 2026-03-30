@@ -14,6 +14,16 @@ function App() {
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [systemStatus, setSystemStatus] = useState(null);
+
+  const checkHealth = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/health`);
+      setSystemStatus(res.data);
+    } catch {
+      setSystemStatus({ status: "offline" });
+    }
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -34,9 +44,11 @@ function App() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    checkHealth();
+    const dataInterval = setInterval(fetchData, 10000);
+    const healthInterval = setInterval(checkHealth, 3600000); // 1 hour
+    return () => { clearInterval(dataInterval); clearInterval(healthInterval); };
+  }, [fetchData, checkHealth]);
 
   // Clear selection when switching tabs
   useEffect(() => { setSelected(new Set()); }, [tab]);
@@ -132,20 +144,23 @@ function App() {
         <div className="header-inner">
           <div className="header-top">
             <h1 className="logo">TRADIUM MONITOR</h1>
-            <button
-              data-testid="refresh-signals-btn"
-              className={`refresh-btn ${refreshing ? "refreshing" : ""}`}
-              onClick={refreshSignals}
-              disabled={refreshing}
-              title="Подтянуть сигналы из Tradium"
-            >
-              <svg className="refresh-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <polyline points="1 20 1 14 7 14"></polyline>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-              </svg>
-              {refreshing ? "Обновление..." : "Обновить"}
-            </button>
+            <div className="header-actions">
+              <StatusIndicator status={systemStatus} onRefresh={checkHealth} />
+              <button
+                data-testid="refresh-signals-btn"
+                className={`refresh-btn ${refreshing ? "refreshing" : ""}`}
+                onClick={refreshSignals}
+                disabled={refreshing}
+                title="Подтянуть сигналы из Tradium"
+              >
+                <svg className="refresh-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                {refreshing ? "Обновление..." : "Обновить"}
+              </button>
+            </div>
           </div>
           <div className="stats-row">
             <StatPill label="Сигналы" value={stats?.total_signals || 0} />
@@ -220,6 +235,41 @@ const StatPill = ({ label, value, color = "default" }) => {
     <div className={`stat-pill ${cls[color]}`} data-testid={`stat-${label.toLowerCase()}`}>
       <span className="pill-value">{value}</span>
       <span className="pill-label">{label}</span>
+    </div>
+  );
+};
+
+const StatusIndicator = ({ status, onRefresh }) => {
+  if (!status) return <div className="status-indicator" data-testid="status-indicator"><span className="status-dot status-loading"></span><span className="status-text">Проверка...</span></div>;
+
+  const isLeader = status.is_leader === true;
+  const isOnline = status.status !== "offline";
+  const workers = status.workers || {};
+  const allRunning = isLeader && Object.values(workers).every(w => w.running);
+  const someRunning = isLeader && Object.values(workers).some(w => w.running);
+
+  let dotClass, label;
+  if (!isOnline) {
+    dotClass = "status-red"; label = "Офлайн";
+  } else if (allRunning) {
+    dotClass = "status-green"; label = "Работает";
+  } else if (someRunning) {
+    dotClass = "status-yellow"; label = "Частично";
+  } else if (status.status === "standby") {
+    dotClass = "status-yellow"; label = "Ожидание";
+  } else {
+    dotClass = "status-red"; label = "Остановлен";
+  }
+
+  const workerNames = { signal_monitor: "Сканер", entry_monitor: "Мониторинг", telegram_bot: "Бот" };
+  const workerDetails = Object.entries(workers).map(([k, v]) =>
+    `${workerNames[k] || k}: ${v.running ? "OK" : v.status || "OFF"}`
+  ).join(" | ");
+
+  return (
+    <div className="status-indicator" data-testid="status-indicator" title={`${workerDetails}\nЛидер: ${status.current_leader || "—"}`} onClick={onRefresh}>
+      <span className={`status-dot ${dotClass}`}></span>
+      <span className="status-text">{label}</span>
     </div>
   );
 };
