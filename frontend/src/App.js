@@ -13,6 +13,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [selected, setSelected] = useState(new Set());
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -84,6 +85,27 @@ function App() {
     }
   };
 
+  const refreshSignals = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const res = await axios.post(`${API}/signals/refresh`);
+      const d = res.data;
+      if (d.status === "ok") {
+        toast.success(`Обновлено! Добавлено: ${d.added}, пропущено: ${d.skipped}`);
+        fetchData();
+      } else if (d.status === "busy") {
+        toast.info("Обновление уже идёт, подождите...");
+      } else {
+        toast.error(d.message || "Ошибка обновления");
+      }
+    } catch (e) {
+      toast.error("Ошибка подключения к серверу");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const tradiumSignals = signals.filter(s => s.status === "watching");
   const dca4Signals = signals.filter(s => s.status === "dca4_reached");
   const confirmedSignals = signals.filter(s => s.status === "entered");
@@ -103,7 +125,23 @@ function App() {
 
       <header className="header">
         <div className="header-inner">
-          <h1 className="logo">TRADIUM MONITOR</h1>
+          <div className="header-top">
+            <h1 className="logo">TRADIUM MONITOR</h1>
+            <button
+              data-testid="refresh-signals-btn"
+              className={`refresh-btn ${refreshing ? "refreshing" : ""}`}
+              onClick={refreshSignals}
+              disabled={refreshing}
+              title="Подтянуть сигналы из Tradium"
+            >
+              <svg className="refresh-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              {refreshing ? "Обновление..." : "Обновить"}
+            </button>
+          </div>
           <div className="stats-row">
             <StatPill label="Сигналы" value={stats?.total_signals || 0} />
             <StatPill label="Слежу" value={stats?.watching || 0} color="blue" />

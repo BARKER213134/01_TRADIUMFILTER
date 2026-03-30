@@ -716,6 +716,147 @@ async def get_market_info(symbol: str):
         raise HTTPException(status_code=404, detail="Could not fetch market data")
     return data
 
+
+# Manual signal refresh endpoint
+refresh_lock = asyncio.Lock()
+
+
+@api_router.post("/signals/refresh")
+async def refresh_signals():
+    """Manually fetch latest signals from Tradium channel"""
+    if refresh_lock.locked():
+        return {"status": "busy", "message": "Обновление уже идёт"}
+
+    async with refresh_lock:
+        try:
+            from telethon import TelegramClient
+            from signal_monitor import parse_tradium_signal, extract_dca4_from_chart, CHARTS_DIR
+            import shutil as _shutil
+            import tempfile as _tempfile
+
+            api_id = int(os.environ.get('TELEGRAM_API_ID', 0))
+            api_hash = os.environ.get('TELEGRAM_API_HASH', '')
+            source_session = ROOT_DIR / 'telethon_session.session'
+            channel_id = int(os.environ.get('TRADIUM_CHANNEL_ID', '-1002423680272'))
+            topic_id = int(os.environ.get('TRADIUM_TOPIC_ID', '3204'))
+
+            # Copy session to temp file to avoid locking conflict with signal_monitor
+            tmp_session = ROOT_DIR / 'refresh_session'
+            _shutil.copy2(str(source_session), str(tmp_session) + '.session')
+
+            tg_client = TelegramClient(str(tmp_session), api_id, api_hash)
+            await tg_client.connect()
+
+            if not await tg_client.is_user_authorized():
+                await tg_client.disconnect()
+                return {"status": "error", "message": "Telethon не авторизован"}
+
+            entity = await tg_client.get_entity(channel_id)
+            messages = await tg_client.get_messages(entity, limit=50, reply_to=topic_id)
+
+            photo_by_id = {}
+            for msg in messages:
+                if msg.photo and not msg.text:
+                    photo_by_id[msg.id] = msg
+
+            added = 0
+            skipped = 0
+
+            for msg in messages:
+                text = msg.text or ""
+                if '#сетап' not in text:
+                    continue
+
+                parsed = parse_tradium_signal(text)
+                if not parsed:
+                    continue
+
+                existing = await db.signals.find_one({
+                    "symbol": parsed['symbol'],
+                    "direction": parsed['direction'],
+                    "entry_price": parsed['entry_price'],
+                })
+                if existing:
+                    skipped += 1
+                    continue
+
+                # Find paired photo
+                import tempfile, shutil
+                chart_path = None
+                saved_chart = None
+                photo_msg = None
+                for offset in [-1, 1, -2, 2]:
+                    if (msg.id + offset) in photo_by_id:
+                        photo_msg = photo_by_id[msg.id + offset]
+                        break
+
+                if photo_msg:
+                    try:
+                        chart_path = await tg_client.download_media(
+                            photo_msg, file=tempfile.mktemp(suffix='.jpg', dir='/tmp')
+                        )
+                    except Exception:
+                        pass
+
+                dca_data = None
+                if chart_path and os.path.exists(chart_path):
+                    dca_data = await extract_dca4_from_chart(chart_path, parsed)
+                    ts = msg.date.strftime('%Y%m%d_%H%M%S') if msg.date else datetime.now().strftime('%Y%m%d_%H%M%S')
+                    chart_filename = f"{parsed['symbol']}_{parsed['direction']}_{ts}.jpg"
+                    saved_chart = str(CHARTS_DIR / chart_filename)
+                    shutil.copy2(chart_path, saved_chart)
+                    try:
+                        os.unlink(chart_path)
+                    except Exception:
+                        pass
+
+                doc = {
+                    "id": f"tradium-refresh-{msg.id}",
+                    "original_text": text[:1000],
+                    "symbol": parsed['symbol'],
+                    "direction": parsed['direction'],
+                    "entry_price": parsed['entry_price'],
+                    "take_profit": parsed.get('take_profit', 0),
+                    "stop_loss": parsed.get('stop_loss', 0),
+                    "rr_ratio": parsed.get('rr_ratio', 0),
+                    "risk_pct": parsed.get('risk_pct', 0),
+                    "amount": parsed.get('amount', 0),
+                    "timeframe": parsed.get('timeframe', '4h'),
+                    "trend": parsed.get('trend', ''),
+                    "ma_status": parsed.get('ma_status', ''),
+                    "rsi_status": parsed.get('rsi_status', ''),
+                    "volume_1d": parsed.get('volume_1d', 0),
+                    "tp_pct": parsed.get('tp_pct', 0),
+                    "sl_pct": parsed.get('sl_pct', 0),
+                    "dca_data": dca_data,
+                    "dca4_level": dca_data.get('dca4') if dca_data else None,
+                    "chart_path": saved_chart,
+                    "status": "watching",
+                    "entry_triggered": False,
+                    "timestamp": msg.date.isoformat() if msg.date else datetime.now(timezone.utc).isoformat(),
+                    "source": "tradium-refresh"
+                }
+                await db.signals.insert_one(doc)
+                added += 1
+
+            await tg_client.disconnect()
+            # Cleanup temp session
+            for ext in ['.session', '.session-journal']:
+                p = ROOT_DIR / f'refresh_session{ext}'
+                if p.exists():
+                    p.unlink()
+
+            return {
+                "status": "ok",
+                "added": added,
+                "skipped": skipped,
+                "message": f"Добавлено: {added}, пропущено: {skipped}"
+            }
+
+        except Exception as e:
+            logger.error(f"Refresh error: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}
+
 # Include the router
 app.include_router(api_router)
 

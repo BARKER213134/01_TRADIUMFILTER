@@ -43,14 +43,32 @@ body {
 }
 .header-inner {
   max-width: 1400px; margin: 0 auto;
+  display: flex; flex-direction: column;
+  gap: 12px;
+}
+.header-top {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 24px; flex-wrap: wrap;
 }
 .logo {
   font-family: var(--mono);
   font-size: 15px; font-weight: 800;
   letter-spacing: 3px; color: var(--accent);
 }
+
+/* Refresh button */
+.refresh-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 4px;
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--accent); font-family: var(--mono);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+.refresh-btn:hover { background: var(--border); border-color: var(--accent); }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refresh-btn.refreshing .refresh-icon { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* Stats pills */
 .stats-row { display: flex; gap: 8px; flex-wrap: wrap; }
