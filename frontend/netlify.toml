@@ -1,7 +1,6 @@
 [build]
-  base = "frontend"
   command = "yarn build"
-  publish = "frontend/build"
+  publish = "build"
 
 [[redirects]]
   from = "/api/*"
