@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://01tradiumfilter-production.up.railway.app/api/:path*"
+    }
+  ]
+}
